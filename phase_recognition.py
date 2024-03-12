@@ -3,7 +3,12 @@ import torch
 from torchvision.io import read_image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
+
+from torchvision.models import resnet50, ResNet50_Weights
+import torch.nn as nn
+import torch.optim as optim
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 
 # Directory containing your images
 image_dir = './frames'
@@ -58,4 +63,70 @@ val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
 train_dataloader = DataLoader(dataset, batch_size=4, sampler=train_sampler)
 val_dataloader = DataLoader(dataset, batch_size=4, sampler=val_sampler)
 
-# Now you can iterate over the train_dataloader and val_dataloader for training and validation
+
+# Load Pretrained ResNet and Modify Final Layer
+resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
+resnet.fc = nn.Linear(resnet.fc.in_features, 15)
+
+# Loss Function and Optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(resnet.parameters(), lr=0.001)
+
+train_losses, val_losses = [], []
+train_accs, val_accs = [], []
+
+# Training Loop
+for epoch in range(5):
+    resnet.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for inputs, labels in train_dataloader:
+        outputs = resnet(inputs)
+        loss = criterion(outputs, labels)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        _, preds = torch.max(outputs, 1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
+
+    train_losses.append(running_loss / len(train_dataloader))
+    train_accs.append(correct / total)
+
+    # Validation Loop
+    resnet.eval()
+    val_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in val_dataloader:
+            outputs = resnet(inputs)
+            loss = criterion(outputs, labels)
+            val_loss += loss.item()
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+
+    val_losses.append(val_loss / len(val_dataloader))
+    val_accs.append(correct / total)
+
+# Plotting
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Training Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.legend()
+plt.title('Loss per Epoch')
+
+plt.subplot(1, 2, 2)
+plt.plot(train_accs, label='Training Accuracy')
+plt.plot(val_accs, label='Validation Accuracy')
+plt.legend()
+plt.title('Accuracy per Epoch')
+plt.show()
+
+plt.savefig('./images/training_validation_loss_acc.png')
