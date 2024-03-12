@@ -15,7 +15,7 @@ df = df.iloc[1:].reset_index(drop=True)
 
 # Video directory and frame save directory
 video_dir = './Videos'
-frame_save_dir = './frames'
+frame_save_dir = './imagesfps'
 if not os.path.exists(frame_save_dir):
     os.makedirs(frame_save_dir)
 
@@ -39,14 +39,17 @@ for index, row in df.iterrows():
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
         frame_counter = start_frame
+        count = 0
         while frame_counter <= end_frame:
             ret, frame = cap.read()
             if not ret:
                 break  # End of video or error
             
-            # Save frame
-            frame_filename = f"{phase}_{video_filename}_{frame_counter}.jpg"
-            cv2.imwrite(os.path.join(frame_save_dir, frame_filename), frame)
-            frame_counter += 1  # Increment to get the next frame
+            if count % (fps // 1) == 0:  # Save 2 frames per second
+                frame_filename = f"{phase}_{video_filename}_{frame_counter}.jpg"
+                cv2.imwrite(os.path.join(frame_save_dir, frame_filename), frame)
+
+            count += 1  # Increment count for every frame
+            frame_counter += 1  # Increment to move to the next frame
         
         cap.release()

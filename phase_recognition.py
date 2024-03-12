@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 # Directory containing your images
-image_dir = './frames'
+image_dir = './imagesfps'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
@@ -77,6 +77,7 @@ train_accs, val_accs = [], []
 
 # Training Loop
 for epoch in range(5):
+    print(epoch)
     resnet.train()
     running_loss = 0.0
     correct = 0
@@ -113,6 +114,19 @@ for epoch in range(5):
 
     val_losses.append(val_loss / len(val_dataloader))
     val_accs.append(correct / total)
+
+
+# Calculate overall accuracies
+overall_train_accuracy = sum(train_accs) / len(train_accs)
+overall_val_accuracy = sum(val_accs) / len(val_accs)
+
+# Convert to percentage
+overall_train_accuracy_percentage = overall_train_accuracy * 100
+overall_val_accuracy_percentage = overall_val_accuracy * 100
+
+print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
+print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
+
 
 # Plotting
 plt.figure(figsize=(10, 5))
