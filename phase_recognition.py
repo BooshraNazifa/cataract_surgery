@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 # Directory containing your images
 image_dir = './imagesfps'
+test_image_dir = './testimagesfps'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
@@ -45,11 +46,20 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-# Create dataset
+# Create train dataset
 dataset = SurgicalPhaseDataset(image_dir, transform=transform)
 
-# Print Dataset
+# Create test dataset
+test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
+
+# Print train Dataset
 for i, (image, label) in enumerate(dataset):
+    print("Image shape:", image.shape, "| Label:", label)
+    if i == 4:  # Print the first 5 items
+        break
+
+# Print test Dataset
+for i, (image, label) in enumerate(test_dataset):
     print("Image shape:", image.shape, "| Label:", label)
     if i == 4:  # Print the first 5 items
         break
@@ -62,7 +72,7 @@ val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
 # Create dataloaders
 train_dataloader = DataLoader(dataset, batch_size=4, sampler=train_sampler)
 val_dataloader = DataLoader(dataset, batch_size=4, sampler=val_sampler)
-
+test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -71,6 +81,12 @@ resnet.fc = nn.Linear(resnet.fc.in_features, 15)
 # Loss Function and Optimizer
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(resnet.parameters(), lr=0.001)
+
+# Check if CUDA is available, else use CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Move the model to the device
+resnet.to(device)
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
@@ -84,6 +100,7 @@ for epoch in range(5):
     total = 0
 
     for inputs, labels in train_dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         optimizer.zero_grad()
@@ -128,19 +145,50 @@ print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
 print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
 
 
+# Test Loop 
+resnet.eval()  
+test_loss = 0.0
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for inputs, labels in test_dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
+        outputs = resnet(inputs)
+        loss = criterion(outputs, labels)
+        test_loss += loss.item()
+        _, preds = torch.max(outputs, 1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
+
+test_accuracy = correct / total
+print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
+
 # Plotting
-plt.figure(figsize=(10, 5))
-plt.subplot(1, 2, 1)
+plt.figure(figsize=(15, 5))  
+
+plt.subplot(1, 3, 1)  # First subplot for training and validation loss
 plt.plot(train_losses, label='Training Loss')
 plt.plot(val_losses, label='Validation Loss')
 plt.legend()
 plt.title('Loss per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
 
-plt.subplot(1, 2, 2)
+plt.subplot(1, 3, 2)  # Second subplot for training and validation accuracy
 plt.plot(train_accs, label='Training Accuracy')
 plt.plot(val_accs, label='Validation Accuracy')
 plt.legend()
 plt.title('Accuracy per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+
+plt.subplot(1, 3, 3)  # Third subplot for test loss and accuracy
+plt.bar(['Test Loss', 'Test Accuracy'], [test_loss / len(test_dataloader), test_accuracy])
+plt.title('Test Performance')
+plt.ylabel('Value')  # Modify as needed; might be percentage or raw number
+
+plt.tight_layout()
 plt.show()
 
-plt.savefig('./images/training_validation_loss_acc.png')
+plt.savefig('./images/training_validation_test_performance.png')

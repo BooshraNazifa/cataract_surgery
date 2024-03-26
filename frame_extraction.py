@@ -8,14 +8,14 @@ def time_to_frames(time_str, fps):
     return int((h * 3600 + m * 60 + s) * fps + f)
 
 # Load the Excel file
-df = pd.read_excel('Cataract_steps_6.xlsx', )
+df = pd.read_excel('Cataract_steps_test.xlsx', )
 print(df.head())
 
 df = df.iloc[1:].reset_index(drop=True)
 
 # Video directory and frame save directory
-video_dir = './Videos'
-frame_save_dir = './imagesfps'
+video_dir = './test_videos'
+frame_save_dir = './testimagesfps'
 if not os.path.exists(frame_save_dir):
     os.makedirs(frame_save_dir)
 
@@ -45,7 +45,7 @@ for index, row in df.iterrows():
             if not ret:
                 break  # End of video or error
             
-            if count % (fps // 1) == 0:  # Save 2 frames per second
+            if count % (fps // 1) == 0:  # Save 1 frames per second
                 frame_filename = f"{phase}_{video_filename}_{frame_counter}.jpg"
                 cv2.imwrite(os.path.join(frame_save_dir, frame_filename), frame)
 
