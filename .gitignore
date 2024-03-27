@@ -1,7 +1,4 @@
-frames/
 Videos/
 myenv/
-imagesfps/
-images2fps/
-test_videos/
-testimagesfps/
+TestFrames/
+TrainFrames/

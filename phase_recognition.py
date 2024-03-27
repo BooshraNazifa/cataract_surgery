@@ -11,8 +11,8 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 # Directory containing your images
-image_dir = './imagesfps'
-test_image_dir = './testimagesfps'
+image_dir = './TrainFrames'
+test_image_dir = './TestFrames'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
