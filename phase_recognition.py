@@ -11,7 +11,8 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 # Directory containing your images
-image_dir = './TrainFrames'
+train_image_dir = './TrainFrames'
+val_image_dir = './ValFrames'
 test_image_dir = './TestFrames'
 
 # List of phase names as your classes
@@ -46,14 +47,19 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-# Create train dataset
-dataset = SurgicalPhaseDataset(image_dir, transform=transform)
-
-# Create test dataset
+# Create dataset
+train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
 test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
 # Print train Dataset
-for i, (image, label) in enumerate(dataset):
+for i, (image, label) in enumerate(train_dataset):
+    print("Image shape:", image.shape, "| Label:", label)
+    if i == 4:  # Print the first 5 items
+        break
+
+# Print val Dataset
+for i, (image, label) in enumerate(val_dataset):
     print("Image shape:", image.shape, "| Label:", label)
     if i == 4:  # Print the first 5 items
         break
@@ -64,14 +70,11 @@ for i, (image, label) in enumerate(test_dataset):
     if i == 4:  # Print the first 5 items
         break
 
-# Splitting dataset into train and test
-train_idx, val_idx = train_test_split(list(range(len(dataset))), test_size=0.2, random_state=42)
-train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
-val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
+
 
 # Create dataloaders
-train_dataloader = DataLoader(dataset, batch_size=4, sampler=train_sampler)
-val_dataloader = DataLoader(dataset, batch_size=4, sampler=val_sampler)
+train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=True)
 test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
 
 # Load Pretrained ResNet and Modify Final Layer
