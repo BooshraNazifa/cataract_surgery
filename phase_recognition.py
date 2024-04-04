@@ -7,7 +7,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 # Directory containing your images
@@ -39,18 +38,35 @@ class SurgicalPhaseDataset(Dataset):
             image = self.transform(image)
         return image, label
 
-# Define transformations
-transform = transforms.Compose([
+# # Define transformations
+# transform = transforms.Compose([
+#     transforms.Resize(256),
+#     transforms.CenterCrop(224),
+#     transforms.ConvertImageDtype(torch.float),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+# ])
+    
+# Transformations for the training set
+train_transform = transforms.Compose([
+    transforms.RandomResizedCrop(224),
+    transforms.RandomHorizontalFlip(),
+    transforms.Lambda(lambda x: x.float() / 255),  # Normalize to [0, 1]
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+# Transformations for the validation and test set
+val_test_transform = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
-    transforms.ConvertImageDtype(torch.float),
+    transforms.Lambda(lambda x: x.float() / 255),  # Normalize to [0, 1]
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
+
 # Create dataset
-train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
-val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
-test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
+train_dataset = SurgicalPhaseDataset(train_image_dir, transform=train_transform)
+val_dataset = SurgicalPhaseDataset(val_image_dir, transform=val_test_transform)
+test_dataset = SurgicalPhaseDataset(test_image_dir, transform=val_test_transform)
 
 # Print train Dataset
 for i, (image, label) in enumerate(train_dataset):
@@ -73,9 +89,9 @@ for i, (image, label) in enumerate(test_dataset):
 
 
 # Create dataloaders
-train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
-val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=True)
-test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
+train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4)
+val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=True, num_workers=4)
+test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True, num_workers=4)
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -85,6 +101,9 @@ resnet.fc = nn.Linear(resnet.fc.in_features, 15)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(resnet.parameters(), lr=0.001)
 
+# Initialize the scheduler
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+
 # Check if CUDA is available, else use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -93,6 +112,7 @@ resnet.to(device)
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
+best_val_loss = float('inf')
 
 # Training Loop
 for epoch in range(5):
@@ -114,7 +134,8 @@ for epoch in range(5):
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
-
+    
+    scheduler.step()
     train_losses.append(running_loss / len(train_dataloader))
     train_accs.append(correct / total)
 
@@ -132,9 +153,17 @@ for epoch in range(5):
             correct += (preds == labels).sum().item()
             total += labels.size(0)
 
-    val_losses.append(val_loss / len(val_dataloader))
-    val_accs.append(correct / total)
+    epoch_val_loss = val_loss / len(val_dataloader)
+    epoch_val_acc = correct / total
+    val_losses.append(epoch_val_loss)
+    val_accs.append(epoch_val_acc)
+    print(f'Val Loss: {epoch_val_loss:.4f}, Accuracy: {epoch_val_acc:.4f}')
 
+    # Checkpointing
+    if epoch_val_loss < best_val_loss:
+        best_val_loss = epoch_val_loss
+        torch.save(resnet.state_dict(), 'model_checkpoint.pth')
+        print('Validation loss decreased, saving checkpoint')
 
 # Calculate overall accuracies
 overall_train_accuracy = sum(train_accs) / len(train_accs)
@@ -167,6 +196,17 @@ with torch.no_grad():
 test_accuracy = correct / total
 print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
 
+phase_predictions = [phases[p] for p in preds.cpu().numpy()]  # Convert indices to phase names
+
+
+# Just to display predictions:
+for i, phase in enumerate(phase_predictions[:20]):  # Display first 20 predictions
+    print(f"Frame {i}: Predicted phase - {phase}")
+
+with open('phase_predictions.txt', 'w') as f:
+    for i, phase in enumerate(phase_predictions):
+        f.write(f"Frame {i}: {phase}\n")
+
 # Plotting
 plt.figure(figsize=(15, 5))  
 
@@ -194,4 +234,4 @@ plt.ylabel('Value')  # Modify as needed; might be percentage or raw number
 plt.tight_layout()
 plt.show()
 
-plt.savefig('./images/training_validation_test_performance.png')
+plt.savefig('./images/training_validation_and_test_performance_10.png')
