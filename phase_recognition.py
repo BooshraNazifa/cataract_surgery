@@ -95,7 +95,11 @@ test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True, num_worke
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-resnet.fc = nn.Linear(resnet.fc.in_features, 15)
+num_ftrs = resnet.fc.in_features
+resnet.fc = nn.Sequential(
+    nn.Dropout(0.5),  
+    nn.Linear(num_ftrs, 14)  
+)
 
 # Loss Function and Optimizer
 criterion = nn.CrossEntropyLoss()
@@ -182,6 +186,7 @@ resnet.eval()
 test_loss = 0.0
 correct = 0
 total = 0
+all_preds = []
 
 with torch.no_grad():
     for inputs, labels in test_dataloader:
@@ -193,10 +198,13 @@ with torch.no_grad():
         correct += (preds == labels).sum().item()
         total += labels.size(0)
 
+        # Store the predictions for this batch
+        all_preds.extend(preds.cpu().numpy())
+
 test_accuracy = correct / total
 print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
 
-phase_predictions = [phases[p] for p in preds.cpu().numpy()]  # Convert indices to phase names
+phase_predictions = [phases[p] for p in all_preds]
 
 
 # Just to display predictions:

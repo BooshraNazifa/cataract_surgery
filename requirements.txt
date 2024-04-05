@@ -1,14 +1,15 @@
 contourpy
 cycler
+imageio[ffmpeg]
 Jinja2
 matplotlib
 networkx
 numpy
-opencv-python
 openpyxl
 pandas
 pillow
 scikit-learn
+scikit-image
 scipy
 sympy
 torch

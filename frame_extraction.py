@@ -1,7 +1,10 @@
-import cv2
-import pandas as pd
+from skimage import io
+import numpy as np
+from skimage.transform import resize
 import os
+import pandas as pd
 from sklearn.model_selection import train_test_split
+import imageio
 
 # Function to convert time string to total frames
 def time_to_frames(time_str, fps):
@@ -105,25 +108,28 @@ def extract_frames(video_list, group_dir, output_dir, df, start_from_video=None)
             extract_phase_frames(video_path, output_dir, phase_info)
 
 def extract_phase_frames(video_path, output_dir, phase_info):
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Failed to open video: {video_path}")
+    try:
+        vid = imageio.get_reader(video_path,  'ffmpeg')
+        fps = vid.get_meta_data()['fps']
+    except Exception as e:
+        print(f"Failed to open video: {video_path} with error {e}")
         return
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
     start_frame = time_to_frames(phase_info['start_time'], fps)
     end_frame = time_to_frames(phase_info['end_time'], fps)
     phase = phase_info['phase']
     video_code = os.path.basename(video_path).split('.')[0]
 
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for frame_counter in range(start_frame, end_frame + 1, int(fps)):  # Adjust step for 1 frame per second
-        ret, frame = cap.read()
-        if not ret:
+        try:
+            frame = vid.get_data(frame_counter)
+            frame = np.array(frame)
+            frame_filename = f"{phase}_{video_code}_{frame_counter}.jpg"
+            io.imsave(os.path.join(output_dir, frame_filename), frame)
+        except Exception as e:
+            print(f"Error reading frame {frame_counter} from {video_path} with error {e}")
             break
-        frame_filename = f"{phase}_{video_code}_{frame_counter}.jpg"
-        cv2.imwrite(os.path.join(output_dir, frame_filename), frame)
-    cap.release()
+
 
 
 
