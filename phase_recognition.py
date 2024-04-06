@@ -1,5 +1,6 @@
 import os
 import torch
+import pandas as pd
 from torchvision.io import read_image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
@@ -33,10 +34,11 @@ class SurgicalPhaseDataset(Dataset):
         img_path = os.path.join(self.img_dir, self.img_labels[idx])
         image = read_image(img_path)
         label = self.img_labels[idx].split('_')[0]
-        label = phases.index(label)  # Convert phase name to an integer index
+        label = phases.index(label)
         if self.transform:
             image = self.transform(image)
-        return image, label
+        filename = self.img_labels[idx]  # Get the filename
+        return image, label, filename  # Return image, label, and filename
 
 # # Define transformations
 # transform = transforms.Compose([
@@ -69,19 +71,19 @@ val_dataset = SurgicalPhaseDataset(val_image_dir, transform=val_test_transform)
 test_dataset = SurgicalPhaseDataset(test_image_dir, transform=val_test_transform)
 
 # Print train Dataset
-for i, (image, label) in enumerate(train_dataset):
+for i, (image, label, _) in enumerate(train_dataset):
     print("Image shape:", image.shape, "| Label:", label)
     if i == 4:  # Print the first 5 items
         break
 
 # Print val Dataset
-for i, (image, label) in enumerate(val_dataset):
+for i, (image, label, _) in enumerate(val_dataset):
     print("Image shape:", image.shape, "| Label:", label)
     if i == 4:  # Print the first 5 items
         break
 
 # Print test Dataset
-for i, (image, label) in enumerate(test_dataset):
+for i, (image, label, _) in enumerate(test_dataset):
     print("Image shape:", image.shape, "| Label:", label)
     if i == 4:  # Print the first 5 items
         break
@@ -126,7 +128,7 @@ for epoch in range(5):
     correct = 0
     total = 0
 
-    for inputs, labels in train_dataloader:
+    for inputs, labels, _ in train_dataloader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
@@ -149,7 +151,7 @@ for epoch in range(5):
     correct = 0
     total = 0
     with torch.no_grad():
-        for inputs, labels in val_dataloader:
+        for inputs, labels, _ in val_dataloader:
             outputs = resnet(inputs)
             loss = criterion(outputs, labels)
             val_loss += loss.item()
@@ -187,9 +189,10 @@ test_loss = 0.0
 correct = 0
 total = 0
 all_preds = []
+all_files = []
 
 with torch.no_grad():
-    for inputs, labels in test_dataloader:
+    for inputs, labels, filenames in test_dataloader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
@@ -200,20 +203,19 @@ with torch.no_grad():
 
         # Store the predictions for this batch
         all_preds.extend(preds.cpu().numpy())
+        all_files.extend(filenames)
 
 test_accuracy = correct / total
 print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
 
 phase_predictions = [phases[p] for p in all_preds]
-
+test_results_df = pd.DataFrame({'Filename': all_files, 'Prediction': phase_predictions})
+test_results_df.to_excel('test_results.xlsx', index=False)
 
 # Just to display predictions:
 for i, phase in enumerate(phase_predictions[:20]):  # Display first 20 predictions
     print(f"Frame {i}: Predicted phase - {phase}")
 
-with open('phase_predictions.txt', 'w') as f:
-    for i, phase in enumerate(phase_predictions):
-        f.write(f"Frame {i}: {phase}\n")
 
 # Plotting
 plt.figure(figsize=(15, 5))  
