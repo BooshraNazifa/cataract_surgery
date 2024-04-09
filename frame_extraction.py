@@ -33,8 +33,13 @@ print(df.head(10))
 
 # Define directories
 resident_videos_dir = './Videos/Resident_Group'
-staff_videos_dir = './Videos/Staff_Group'
+staff_videos_dir = './Videos/Staff_Group' 
 output_dirs = {'train': './TrainFrames', 'val': './ValFrames', 'test': './TestFrames'}
+
+# Server
+# resident_videos_dir = '/home/booshra/project/def-holden/Cataract_data/Resident_Group'
+# staff_videos_dir = '/home/booshra/project/def-holden/Cataract_data/Staff_Group'
+# output_dirs = {'train': '/scratch/booshra/50/TrainFrames', 'val': '/scratchbooshra/50/ValFrames', 'test': './TestFrames'}
 
 # Create output directories if they don't exist
 for dir in output_dirs.values():
@@ -53,6 +58,10 @@ staff_videos = get_videos_excluding_tests(staff_videos_dir, test_videos)
 # Get test vdeos
 test_filenames_resident = ['191R1.mp4','191R2.mp4', '191R3.mp4', '191R4.mp4', '191R5.mp4', '191R6.mp4']
 test_filenames_staff = ['191S1.mp4', '191S3.mp4', '191S4.mov','191S5.mp4', '191S6.mp4', '191S7.mov']
+
+# # Limit to the first 50 videos for each group
+# resident_videos = resident_videos[:50]
+# staff_videos = staff_videos[:50]
 
 print("Resident videos:", resident_videos)
 print("Staff videos:", staff_videos)
@@ -120,12 +129,15 @@ def extract_phase_frames(video_path, output_dir, phase_info):
     phase = phase_info['phase']
     video_code = os.path.basename(video_path).split('.')[0]
 
-    for frame_counter in range(start_frame, end_frame + 1, int(fps)):  # Adjust step for 1 frame per second
+    for frame_counter in range(start_frame, end_frame + 1, int(fps / 30)):  # Adjust step for 1 frame per second
         try:
             frame = vid.get_data(frame_counter)
-            frame = np.array(frame)
-            frame_filename = f"{phase}_{video_code}_{frame_counter}.jpg"
-            io.imsave(os.path.join(output_dir, frame_filename), frame)
+            frame_timestamp_seconds = frame_counter / fps  # Timestamp in seconds
+
+            frame_filename = f"{phase}_{video_code}_{frame_counter}_{frame_timestamp_seconds:.2f}.jpg"
+            io.imsave(os.path.join(output_dir, frame_filename), np.array(frame))
+
+            print(f"Extracted frame at {frame_timestamp_seconds:.2f} seconds saved as {frame_filename}")
         except Exception as e:
             print(f"Error reading frame {frame_counter} from {video_path} with error {e}")
             break

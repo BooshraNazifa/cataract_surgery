@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import numpy as np
 from torchvision.io import read_image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
@@ -9,6 +10,8 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, roc_curve, auc, precision_recall_curve
+
 
 # Directory containing your images
 train_image_dir = './TrainFrames'
@@ -33,60 +36,31 @@ class SurgicalPhaseDataset(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.img_labels[idx])
         image = read_image(img_path)
-        label = self.img_labels[idx].split('_')[0]
+        filename_content = self.img_labels[idx].split('_')
+        label = filename_content[0]
         label = phases.index(label)
         if self.transform:
             image = self.transform(image)
-        filename = self.img_labels[idx]  # Get the filename
-        return image, label, filename  # Return image, label, and filename
-
-# # Define transformations
-# transform = transforms.Compose([
-#     transforms.Resize(256),
-#     transforms.CenterCrop(224),
-#     transforms.ConvertImageDtype(torch.float),
-#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-# ])
+        filename = filename_content[1]  # Get the filename
+        timestamp = float(filename_content[-1].split('.')[0])  # Assuming timestamp is the last component
+        return image, label, filename, timestamp  # Return image, label, filename, and timestamp
     
-# Transformations for the training set
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(224),
-    transforms.RandomHorizontalFlip(),
-    transforms.Lambda(lambda x: x.float() / 255),  # Normalize to [0, 1]
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+    
 
-# Transformations for the validation and test set
-val_test_transform = transforms.Compose([
+# Define transformations
+transform = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
-    transforms.Lambda(lambda x: x.float() / 255),  # Normalize to [0, 1]
+    transforms.ConvertImageDtype(torch.float),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
 
+
 # Create dataset
-train_dataset = SurgicalPhaseDataset(train_image_dir, transform=train_transform)
-val_dataset = SurgicalPhaseDataset(val_image_dir, transform=val_test_transform)
-test_dataset = SurgicalPhaseDataset(test_image_dir, transform=val_test_transform)
-
-# Print train Dataset
-for i, (image, label, _) in enumerate(train_dataset):
-    print("Image shape:", image.shape, "| Label:", label)
-    if i == 4:  # Print the first 5 items
-        break
-
-# Print val Dataset
-for i, (image, label, _) in enumerate(val_dataset):
-    print("Image shape:", image.shape, "| Label:", label)
-    if i == 4:  # Print the first 5 items
-        break
-
-# Print test Dataset
-for i, (image, label, _) in enumerate(test_dataset):
-    print("Image shape:", image.shape, "| Label:", label)
-    if i == 4:  # Print the first 5 items
-        break
+train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
+test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
 
 
@@ -128,7 +102,7 @@ for epoch in range(5):
     correct = 0
     total = 0
 
-    for inputs, labels, _ in train_dataloader:
+    for inputs, labels, filename, timestamp in train_dataloader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
@@ -151,7 +125,7 @@ for epoch in range(5):
     correct = 0
     total = 0
     with torch.no_grad():
-        for inputs, labels, _ in val_dataloader:
+        for inputs, labels, filename, timestamp  in val_dataloader:
             outputs = resnet(inputs)
             loss = criterion(outputs, labels)
             val_loss += loss.item()
@@ -190,9 +164,10 @@ correct = 0
 total = 0
 all_preds = []
 all_files = []
+all_times = []
 
 with torch.no_grad():
-    for inputs, labels, filenames in test_dataloader:
+    for inputs, labels, filename, timestamp  in test_dataloader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
@@ -200,16 +175,15 @@ with torch.no_grad():
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
+        print(timestamp)
 
         # Store the predictions for this batch
         all_preds.extend(preds.cpu().numpy())
-        all_files.extend(filenames)
-
-test_accuracy = correct / total
-print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
+        all_files.extend(filename)
+        all_times.extend(timestamp)
 
 phase_predictions = [phases[p] for p in all_preds]
-test_results_df = pd.DataFrame({'Filename': all_files, 'Prediction': phase_predictions})
+test_results_df = pd.DataFrame({'Filename': all_files,'Time Recorded':all_times, 'Phase': phase_predictions})
 test_results_df.to_excel('test_results.xlsx', index=False)
 
 # Just to display predictions:
@@ -217,31 +191,61 @@ for i, phase in enumerate(phase_predictions[:20]):  # Display first 20 predictio
     print(f"Frame {i}: Predicted phase - {phase}")
 
 
-# Plotting
-plt.figure(figsize=(15, 5))  
+# Calculate evaluation metrics
+test_labels = np.array([phases[label] for label in all_preds])
+test_predictions = np.array([phases[label] for label in all_files])
 
-plt.subplot(1, 3, 1)  # First subplot for training and validation loss
-plt.plot(train_losses, label='Training Loss')
-plt.plot(val_losses, label='Validation Loss')
-plt.legend()
-plt.title('Loss per Epoch')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
+precision = precision_score(test_labels, test_predictions, average='weighted')
+recall = recall_score(test_labels, test_predictions, average='weighted')
+f1 = f1_score(test_labels, test_predictions, average='weighted')
+test_accuracy = correct / total
 
-plt.subplot(1, 3, 2)  # Second subplot for training and validation accuracy
-plt.plot(train_accs, label='Training Accuracy')
-plt.plot(val_accs, label='Validation Accuracy')
-plt.legend()
-plt.title('Accuracy per Epoch')
-plt.xlabel('Epoch')
-plt.ylabel('Accuracy')
 
-plt.subplot(1, 3, 3)  # Third subplot for test loss and accuracy
-plt.bar(['Test Loss', 'Test Accuracy'], [test_loss / len(test_dataloader), test_accuracy])
-plt.title('Test Performance')
-plt.ylabel('Value')  # Modify as needed; might be percentage or raw number
+# Print evaluation metrics
+print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
+print(f'Precision: {precision:.4f}')
+print(f'Recall: {recall:.4f}')
+print(f'F1 Score: {f1:.4f}')
 
+# Confusion Matrix
+conf_matrix = confusion_matrix(test_labels, test_predictions, labels=phases)
+plt.figure(figsize=(10, 8))
+plt.imshow(conf_matrix, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Confusion Matrix')
+plt.colorbar()
+tick_marks = np.arange(len(phases))
+plt.xticks(tick_marks, phases, rotation=45)
+plt.yticks(tick_marks, phases)
+plt.ylabel('True label')
+plt.xlabel('Predicted label')
 plt.tight_layout()
-plt.show()
+plt.savefig('./images/confusion_matrix.png')
 
-plt.savefig('./images/training_validation_and_test_performance_10.png')
+# Calculate ROC curve and AUC
+fpr, tpr, thresholds = roc_curve(test_labels, test_predictions, pos_label="Positive Class Label")
+roc_auc = auc(fpr, tpr)
+
+# Plot ROC curve
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.legend(loc="lower right")
+plt.savefig('./images/roc_curve.png')
+
+# Calculate precision-recall curve and AUC
+precision, recall, thresholds = precision_recall_curve(test_labels, test_predictions, pos_label="Positive Class Label")
+pr_auc = auc(recall, precision)
+
+# Plot precision-recall curve
+plt.figure()
+plt.plot(recall, precision, color='blue', lw=2, label='Precision-Recall curve (area = %0.2f)' % pr_auc)
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('Precision-Recall Curve')
+plt.legend(loc="lower left")
+plt.savefig('./images/precision_recall_curve.png') 
