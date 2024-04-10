@@ -10,13 +10,18 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, roc_curve, auc, precision_recall_curve
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_curve, auc, precision_recall_curve
 
 
 # Directory containing your images
 train_image_dir = './TrainFrames'
 val_image_dir = './ValFrames'
 test_image_dir = './TestFrames'
+
+# Directory containing your images in server
+# train_image_dir = '/scratch/booshra/30/TrainFrames'
+# val_image_dir = '/scratch/booshra/30/ValFrames'
+# test_image_dir = '/scratch/booshra/30/TestFrames'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
@@ -71,11 +76,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True, num_worke
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-num_ftrs = resnet.fc.in_features
-resnet.fc = nn.Sequential(
-    nn.Dropout(0.5),  
-    nn.Linear(num_ftrs, 14)  
-)
+resnet.fc = nn.Linear(resnet.fc.in_features, 14)
 
 # Loss Function and Optimizer
 criterion = nn.CrossEntropyLoss()
@@ -163,11 +164,11 @@ test_loss = 0.0
 correct = 0
 total = 0
 all_preds = []
-all_files = []
-all_times = []
+true_labels = []
+results_data = []  # List to store data for final dataframe
 
 with torch.no_grad():
-    for inputs, labels, filename, timestamp  in test_dataloader:
+    for inputs, labels, filenames, timestamps in test_dataloader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
@@ -175,29 +176,28 @@ with torch.no_grad():
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
-        print(timestamp)
 
-        # Store the predictions for this batch
-        all_preds.extend(preds.cpu().numpy())
-        all_files.extend(filename)
-        all_times.extend(timestamp)
+        # Iterate over each sample in the batch
+        for i in range(len(filenames)):
+            filename = filenames[i]
+            timestamp = float(timestamps[i].item())
+            phase = phases[preds[i]]  # Get predicted phase
+            true_label = phases[labels[i]]  # Get true phase label
+            
+            # Append data to results list
+            results_data.append({'Filename': filename, 'Timestamp': timestamp, 'Predicted Phase': phase, 'True Phase': true_label})
+            all_preds.append(phase)
+            true_labels.append(true_label)
+            
 
-phase_predictions = [phases[p] for p in all_preds]
-test_results_df = pd.DataFrame({'Filename': all_files,'Time Recorded':all_times, 'Phase': phase_predictions})
+# Create DataFrame from results data
+test_results_df = pd.DataFrame(results_data)
 test_results_df.to_excel('test_results.xlsx', index=False)
 
-# Just to display predictions:
-for i, phase in enumerate(phase_predictions[:20]):  # Display first 20 predictions
-    print(f"Frame {i}: Predicted phase - {phase}")
 
-
-# Calculate evaluation metrics
-test_labels = np.array([phases[label] for label in all_preds])
-test_predictions = np.array([phases[label] for label in all_files])
-
-precision = precision_score(test_labels, test_predictions, average='weighted')
-recall = recall_score(test_labels, test_predictions, average='weighted')
-f1 = f1_score(test_labels, test_predictions, average='weighted')
+precision = precision_score(true_labels, all_preds, average='weighted')
+recall = recall_score(true_labels, all_preds, average='weighted')
+f1 = f1_score(true_labels, all_preds, average='weighted')
 test_accuracy = correct / total
 
 
@@ -207,45 +207,29 @@ print(f'Precision: {precision:.4f}')
 print(f'Recall: {recall:.4f}')
 print(f'F1 Score: {f1:.4f}')
 
-# Confusion Matrix
-conf_matrix = confusion_matrix(test_labels, test_predictions, labels=phases)
-plt.figure(figsize=(10, 8))
-plt.imshow(conf_matrix, interpolation='nearest', cmap=plt.cm.Blues)
-plt.title('Confusion Matrix')
-plt.colorbar()
-tick_marks = np.arange(len(phases))
-plt.xticks(tick_marks, phases, rotation=45)
-plt.yticks(tick_marks, phases)
-plt.ylabel('True label')
-plt.xlabel('Predicted label')
+
+# Plotting
+plt.figure(figsize=(15, 5))  
+
+plt.subplot(1, 3, 1)  # First subplot for training and validation loss
+plt.plot(train_losses, label='Training Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.legend()
+plt.title('Loss per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+
+plt.subplot(1, 3, 2)  # Second subplot for training and validation accuracy
+plt.plot(train_accs, label='Training Accuracy')
+plt.plot(val_accs, label='Validation Accuracy')
+plt.legend()
+plt.title('Accuracy per Epoch')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+
+plt.subplot(1, 3, 3)  # Third subplot for test loss and accuracy
+plt.bar(['Test Loss', 'Test Accuracy'], [test_loss / len(test_dataloader), test_accuracy])
+plt.title('Test Performance')
+plt.ylabel('Value')  # Modify as needed; might be percentage or raw number
 plt.tight_layout()
-plt.savefig('./images/confusion_matrix.png')
-
-# Calculate ROC curve and AUC
-fpr, tpr, thresholds = roc_curve(test_labels, test_predictions, pos_label="Positive Class Label")
-roc_auc = auc(fpr, tpr)
-
-# Plot ROC curve
-plt.figure()
-plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic (ROC) Curve')
-plt.legend(loc="lower right")
-plt.savefig('./images/roc_curve.png')
-
-# Calculate precision-recall curve and AUC
-precision, recall, thresholds = precision_recall_curve(test_labels, test_predictions, pos_label="Positive Class Label")
-pr_auc = auc(recall, precision)
-
-# Plot precision-recall curve
-plt.figure()
-plt.plot(recall, precision, color='blue', lw=2, label='Precision-Recall curve (area = %0.2f)' % pr_auc)
-plt.xlabel('Recall')
-plt.ylabel('Precision')
-plt.title('Precision-Recall Curve')
-plt.legend(loc="lower left")
-plt.savefig('./images/precision_recall_curve.png') 
+plt.savefig('./images/training_validation_test_performance.png')

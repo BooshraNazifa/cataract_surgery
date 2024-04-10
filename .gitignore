@@ -4,3 +4,5 @@ TestFrames/
 TrainFrames/
 ValFrames/
 Files/
+model_checkpoint.pth
+test_results.xlsx

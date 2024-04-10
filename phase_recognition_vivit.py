@@ -6,7 +6,6 @@ from torchvision import transforms
 from torchvision.io import read_video
 import torch.nn as nn
 import torch.optim as optim
-from pytorchvideo.models import x3d
 from sklearn.model_selection import train_test_split
 
 def timestamp_to_seconds(timestamp, fps=30):
@@ -76,7 +75,7 @@ class SurgicalPhaseVideoDataset(Dataset):
         if self.transform is not None:
             frames = torch.stack([self.transform(img) for img in frames])
         
-        label = phases.index(row['phase'])  # Assuming 'phases' is a list of phase names
+        label = phases.index(row['phase'])  
         
         return frames, label
     
@@ -125,25 +124,31 @@ staff_videos = get_videos_excluding_tests(staff_videos_dir, test_videos)
 # Split video names into train and test sets
 train_resident, val_resident = train_test_split(resident_videos, test_size=0.2, random_state=42)
 train_staff, val_staff = train_test_split(staff_videos, test_size=0.2, random_state=42)
+test_resident = ['191R1', '191R2', '191R3', '191R4', '191R5', '191R6']
+test_staff = ['191S1', '191S3', '191S4','191S5', '191S6', '191S7']
 
-train_video_ids = train_resident + train_staff
-train_video_ids = [vid_id.replace('.mp4', '') for vid_id in train_video_ids]
-val_video_ids = val_resident + val_staff
-val_video_ids = [vid_id.replace('.mp4', '') for vid_id in val_video_ids]
+# Filter annotations for resident and staff videos
+train_resident_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in train_resident])]
+train_staff_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in train_staff])]
 
-train_annotations = df_final[df_final['video_id'].isin(train_video_ids)]
-val_annotations = df_final[df_final['video_id'].isin(val_video_ids)]
-test_annotations = df_final[df_final['video_id'].isin(test_videos)]
+# Similar approach for validation and test datasets
+val_resident_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in val_resident])]
+val_staff_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in val_staff])]
+
+test_resident_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in test_resident])]
+test_staff_annotations = df_final[df_final['video_id'].isin([vid_id.replace('.mp4', '') for vid_id in test_staff])]
+
 
 num_frames = 36
-train_resident_dataset = SurgicalPhaseVideoDataset(train_annotations, resident_videos_dir, num_frames, transform=frame_transform)
-train_staff_dataset = SurgicalPhaseVideoDataset(train_annotations, staff_videos_dir, num_frames, transform=frame_transform)
+# Use the filtered annotations for creating datasets
+train_resident_dataset = SurgicalPhaseVideoDataset(train_resident_annotations, resident_videos_dir, num_frames, transform=frame_transform)
+train_staff_dataset = SurgicalPhaseVideoDataset(train_staff_annotations, staff_videos_dir, num_frames, transform=frame_transform)
 
-val_resident_dataset = SurgicalPhaseVideoDataset(val_annotations, resident_videos_dir, num_frames, transform=frame_transform)
-val_staff_dataset = SurgicalPhaseVideoDataset(val_annotations, staff_videos_dir, num_frames, transform=frame_transform)
+val_resident_dataset = SurgicalPhaseVideoDataset(val_resident_annotations, resident_videos_dir, num_frames, transform=frame_transform)
+val_staff_dataset = SurgicalPhaseVideoDataset(val_staff_annotations, staff_videos_dir, num_frames, transform=frame_transform)
 
-test_resident_dataset = SurgicalPhaseVideoDataset(test_annotations, resident_videos_dir, num_frames, transform=frame_transform)
-test_staff_dataset = SurgicalPhaseVideoDataset(test_annotations, staff_videos_dir, num_frames, transform=frame_transform)
+test_resident_dataset = SurgicalPhaseVideoDataset(test_resident_annotations, resident_videos_dir, num_frames, transform=frame_transform)
+test_staff_dataset = SurgicalPhaseVideoDataset(test_staff_annotations, staff_videos_dir, num_frames, transform=frame_transform)
 
 
 # Combine datasets using ConcatDataset
@@ -156,10 +161,11 @@ val_dataloader = DataLoader(val_dataset, batch_size=4,  num_workers=4)
 test_dataloader = DataLoader(test_dataset, batch_size=4,  num_workers=4)
 
 # Load a pre-trained X3D model
-model = x3d.x3d_xs(pretrained=True)
+model = torch.hub.load('facebookresearch/pytorchvideo', 'x3d_s', pretrained=True)
+num_classes = len(phases)  
 
-# Adjust the final fully connected layer to match the number of phases/classes in your task
-model.head.projection = nn.Linear(in_features=model.head.projection.in_features, out_features=len(phases))
+# Replace the final fully connected layer to match the number of classes
+model.blocks[-1].proj = torch.nn.Linear(in_features=model.blocks[-1].proj.in_features, out_features=num_classes)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)

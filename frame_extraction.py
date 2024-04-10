@@ -37,9 +37,9 @@ staff_videos_dir = './Videos/Staff_Group'
 output_dirs = {'train': './TrainFrames', 'val': './ValFrames', 'test': './TestFrames'}
 
 # Server
-# resident_videos_dir = '/home/booshra/project/def-holden/Cataract_data/Resident_Group'
-# staff_videos_dir = '/home/booshra/project/def-holden/Cataract_data/Staff_Group'
-# output_dirs = {'train': '/scratch/booshra/50/TrainFrames', 'val': '/scratchbooshra/50/ValFrames', 'test': './TestFrames'}
+# resident_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Resident_Group'
+# staff_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Staff_Group'
+# output_dirs = {'train': '/scratch/booshra/50/TrainFrames', 'val': '/scratch/booshra/50/ValFrames', 'test': './TestFrames'}
 
 # Create output directories if they don't exist
 for dir in output_dirs.values():
@@ -118,29 +118,48 @@ def extract_frames(video_list, group_dir, output_dir, df, start_from_video=None)
 
 def extract_phase_frames(video_path, output_dir, phase_info):
     try:
-        vid = imageio.get_reader(video_path,  'ffmpeg')
+        vid = imageio.get_reader(video_path, 'ffmpeg')
         fps = vid.get_meta_data()['fps']
     except Exception as e:
         print(f"Failed to open video: {video_path} with error {e}")
         return
 
+    # Calculate the start and end frames based on the video's fps
     start_frame = time_to_frames(phase_info['start_time'], fps)
     end_frame = time_to_frames(phase_info['end_time'], fps)
+
+    # Calculate the duration in seconds
+    duration_in_seconds = (end_frame - start_frame) / fps
+
+    # Calculate how many frames to extract (30 frames per second)
+    total_frames_to_extract = int(30 * duration_in_seconds)
+
+    # Calculate the step size to spread the frame extraction evenly across the duration
+    if total_frames_to_extract > 0:
+        step_size = (end_frame - start_frame) / total_frames_to_extract
+    else:
+        step_size = 1  # Fallback to avoid division by zero
+
     phase = phase_info['phase']
     video_code = os.path.basename(video_path).split('.')[0]
 
-    for frame_counter in range(start_frame, end_frame + 1, int(fps / 30)):  # Adjust step for 1 frame per second
+    current_frame = start_frame
+    for i in range(total_frames_to_extract):
         try:
-            frame = vid.get_data(frame_counter)
-            frame_timestamp_seconds = frame_counter / fps  # Timestamp in seconds
+            # Calculate the next frame to extract
+            frame_index = int(current_frame)
+            frame = vid.get_data(frame_index)
+            frame_timestamp_seconds = frame_index / fps  # Timestamp in seconds
 
-            frame_filename = f"{phase}_{video_code}_{frame_counter}_{frame_timestamp_seconds:.2f}.jpg"
+            frame_filename = f"{phase}_{video_code}_{frame_index}_{frame_timestamp_seconds:.2f}.jpg"
             io.imsave(os.path.join(output_dir, frame_filename), np.array(frame))
 
             print(f"Extracted frame at {frame_timestamp_seconds:.2f} seconds saved as {frame_filename}")
+            current_frame += step_size
         except Exception as e:
-            print(f"Error reading frame {frame_counter} from {video_path} with error {e}")
+            print(f"Error reading frame {frame_index} from {video_path} with error {e}")
             break
+
 
 
 
