@@ -10,7 +10,7 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_curve, auc, precision_recall_curve
+from sklearn.metrics import precision_score, recall_score, f1_score, classification_report
 
 
 # Directory containing your images
@@ -19,9 +19,9 @@ val_image_dir = './ValFrames'
 test_image_dir = './TestFrames'
 
 # Directory containing your images in server
-# train_image_dir = '/scratch/booshra/30/TrainFrames'
-# val_image_dir = '/scratch/booshra/30/ValFrames'
-# test_image_dir = '/scratch/booshra/30/TestFrames'
+# train_image_dir = '/scratch/booshra/50/TrainFrames'
+# val_image_dir = '/scratch/booshra/50/ValFrames'
+# test_image_dir = './TestFrames'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
@@ -186,8 +186,8 @@ with torch.no_grad():
             
             # Append data to results list
             results_data.append({'Filename': filename, 'Timestamp': timestamp, 'Predicted Phase': phase, 'True Phase': true_label})
-            all_preds.append(phase)
-            true_labels.append(true_label)
+            all_preds.append(preds[i].item())
+            true_labels.append(labels[i].item())
             
 
 # Create DataFrame from results data
@@ -206,6 +206,16 @@ print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
 print(f'Precision: {precision:.4f}')
 print(f'Recall: {recall:.4f}')
 print(f'F1 Score: {f1:.4f}')
+
+# Find the unique classes present in your test data
+unique_classes = np.unique(true_labels + all_preds)
+
+# Generate a list of phase names that match the unique classes found in the data
+target_names_for_report = [phases[i] for i in unique_classes]
+
+# Calculate and print classification report
+report = classification_report(true_labels, all_preds, target_names=target_names_for_report)
+print(report)
 
 
 # Plotting

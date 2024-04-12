@@ -32,19 +32,18 @@ df = df.iloc[1:].reset_index(drop=True)
 print(df.head(10))
 
 # Define directories
-resident_videos_dir = './Videos/Resident_Group'
-staff_videos_dir = './Videos/Staff_Group' 
-output_dirs = {'train': './TrainFrames', 'val': './ValFrames', 'test': './TestFrames'}
+# resident_videos_dir = './Videos/Resident_Group'
+# staff_videos_dir = './Videos/Staff_Group' 
+# output_dirs = {'train': './TrainFrames', 'val': './ValFrames', 'test': './TestFrames'}
 
 # Server
-# resident_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Resident_Group'
-# staff_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Staff_Group'
-# output_dirs = {'train': '/scratch/booshra/50/TrainFrames', 'val': '/scratch/booshra/50/ValFrames', 'test': './TestFrames'}
+resident_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Resident_Group'
+staff_videos_dir = '/home/booshra/projects/def-holden/Cataract_data/Staff_Group'
+output_dirs = {'train': '/scratch/booshra/30/TrainFrames', 'val': '/scratch/booshra/30/ValFrames', 'test': '/scratch/booshra/30/TestFrames'}
 
 # Create output directories if they don't exist
 for dir in output_dirs.values():
     os.makedirs(dir, exist_ok=True)
-
 
 
 # Specify explicit test videos
@@ -59,9 +58,6 @@ staff_videos = get_videos_excluding_tests(staff_videos_dir, test_videos)
 test_filenames_resident = ['191R1.mp4','191R2.mp4', '191R3.mp4', '191R4.mp4', '191R5.mp4', '191R6.mp4']
 test_filenames_staff = ['191S1.mp4', '191S3.mp4', '191S4.mov','191S5.mp4', '191S6.mp4', '191S7.mov']
 
-# # Limit to the first 50 videos for each group
-# resident_videos = resident_videos[:50]
-# staff_videos = staff_videos[:50]
 
 print("Resident videos:", resident_videos)
 print("Staff videos:", staff_videos)
@@ -119,7 +115,7 @@ def extract_frames(video_list, group_dir, output_dir, df, start_from_video=None)
 def extract_phase_frames(video_path, output_dir, phase_info):
     try:
         vid = imageio.get_reader(video_path, 'ffmpeg')
-        fps = vid.get_meta_data()['fps']
+        fps = 29.2012202213
     except Exception as e:
         print(f"Failed to open video: {video_path} with error {e}")
         return
@@ -132,7 +128,7 @@ def extract_phase_frames(video_path, output_dir, phase_info):
     duration_in_seconds = (end_frame - start_frame) / fps
 
     # Calculate how many frames to extract (30 frames per second)
-    total_frames_to_extract = int(30 * duration_in_seconds)
+    total_frames_to_extract = int(29.2012202213 * duration_in_seconds)
 
     # Calculate the step size to spread the frame extraction evenly across the duration
     if total_frames_to_extract > 0:
@@ -153,13 +149,10 @@ def extract_phase_frames(video_path, output_dir, phase_info):
 
             frame_filename = f"{phase}_{video_code}_{frame_index}_{frame_timestamp_seconds:.2f}.jpg"
             io.imsave(os.path.join(output_dir, frame_filename), np.array(frame))
-
-            print(f"Extracted frame at {frame_timestamp_seconds:.2f} seconds saved as {frame_filename}")
             current_frame += step_size
         except Exception as e:
             print(f"Error reading frame {frame_index} from {video_path} with error {e}")
             break
-
 
 
 
