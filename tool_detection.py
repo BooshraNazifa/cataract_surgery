@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import os
 import torch.nn as nn
+import numpy as np
 import imageio
 from sklearn.model_selection import train_test_split
 from einops.layers.torch import Rearrange
@@ -40,7 +41,7 @@ def tools_to_vector(tools):
     return [1 if tool in tools else 0 for tool in all_tools]
 
 # Directory containing CSV files
-csv_directory = '/home/booshra/final_project/cataract_surgery/Cataract_Tools'
+csv_directory = './Cataract_Tools'
 df = load_data_from_directory(csv_directory)
 print(df.head())
 
@@ -141,7 +142,11 @@ class VideoDataset(Dataset):
             return torch.tensor([]), torch.tensor([])  # Handling failure
 
         frames_tensor = torch.stack(frames)
-        tools_vector = torch.tensor(self.annotations[idx]['Tools'], dtype=torch.float32)
+        if idx in self.annotations:
+            tools_vector = torch.tensor(self.annotations[idx], dtype=torch.float32)
+        else:
+            print(f"Warning: Fallback for missing annotation at index {idx}.")
+            tools_vector = torch.zeros(10, dtype=torch.float32)
 
         return frames_tensor, tools_vector
 
@@ -154,12 +159,14 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-train_ids, test_ids = train_test_split(video_ids, test_size=4, random_state=42)  
-train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
+# train_ids, test_ids = train_test_split(video_ids, test_size=4, random_state=42)  
+# train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
+train_ids = [video_ids[0]]
+test_ids = [video_ids[1]]
 
 
 train_df = df[df['FileName'].isin(train_ids)]
-val_df = df[df['FileName'].isin(val_ids)]
+# val_df = df[df['FileName'].isin(val_ids)]
 test_df = df[df['FileName'].isin(test_ids)]
 
 def verify_videos(video_files):
@@ -182,32 +189,51 @@ def find_file_with_extension(base_path, filename, extensions):
             return full_path
     return None
 
+def is_empty(tools):
+    """ Check if the tools data is empty. """
+    if isinstance(tools, list):
+        return not tools
+    elif isinstance(tools, np.ndarray):
+        return tools.size == 0
+    elif pd.isna(tools):
+        return True
+    else:
+        return not bool(tools)  # Fallback for other types, using bool conversion
+
 def extract_info(df):
     video_files = []
+    annotations = {}
     for name in df['FileName'].unique():
         file_path = find_file_with_extension(videos_dir, name, ['.mp4', '.mov'])
         if file_path:
-            video_files.append(file_path)
+            tools_data = df[df['FileName'] == os.path.splitext(os.path.basename(file_path))[0]].iloc[0]
+            if is_empty(tools_data['Tools']):
+                print(f"Skipping {name} due to missing annotations.")
+            else:
+                video_files.append(file_path)
+                annotations[file_path] = tools_data['Tools']
         else:
             print(f"No valid file found for {name} with any of the checked extensions")
 
     video_files = verify_videos(video_files)
-    annotations = {file: df[df['FileName'] == os.path.splitext(os.path.basename(file))[0]]['Tools'].iloc[0] for file in video_files}
     return video_files, annotations
 
+
+
 train_files, train_annotations = extract_info(train_df)
-val_files, val_annotations = extract_info(val_df)
+# val_files, val_annotations = extract_info(val_df)
 test_files, test_annotations = extract_info(test_df)
 
 # Create datasets
 train_dataset = VideoDataset(train_files, train_annotations, transform=transform)
-val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
+# val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
 test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
 
 # Create data loaders
 train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+# val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
 
 
 # Assume the model and necessary imports are defined
@@ -215,7 +241,7 @@ model = ViViT(num_frames=16, num_classes=len(df.iloc[0]['Tools']), image_size=25
 criterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-def train_model(model, criterion, optimizer, val_loader, train_loader, num_epochs=10):
+def train_model(model, criterion, optimizer, train_loader, num_epochs=10):
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
@@ -227,18 +253,18 @@ def train_model(model, criterion, optimizer, val_loader, train_loader, num_epoch
             optimizer.step()
             total_loss += loss.item()
 
-        # Validation
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for frames, labels in val_loader:
-                outputs = model(frames)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item()
+        # # Validation
+        # model.eval()
+        # val_loss = 0
+        # with torch.no_grad():
+        #     for frames, labels in val_loader:
+        #         outputs = model(frames)
+        #         loss = criterion(outputs, labels)
+        #         val_loss += loss.item()
 
-        print(f'Epoch {epoch}: Train Loss {total_loss / len(train_loader)}, Val Loss {val_loss / len(val_loader)}')
+        print(f'Epoch {epoch}: Train Loss {total_loss / len(train_loader)}')
 
-train_model(model, criterion, optimizer, val_loader, train_loader)
+train_model(model, criterion, optimizer, train_loader)
 
 
 def evaluate_model(model, test_loader):

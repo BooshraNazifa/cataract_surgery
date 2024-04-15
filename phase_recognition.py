@@ -13,15 +13,15 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score, classification_report
 
 
-# Directory containing your images
-train_image_dir = './TrainFrames'
-val_image_dir = './ValFrames'
-test_image_dir = './TestFrames'
+# # Directory containing your images
+# train_image_dir = './Files/TrainFrames'
+# val_image_dir = './Files/ValFrames'
+# test_image_dir = './Files/TestFrames'
 
 # Directory containing your images in server
-# train_image_dir = '/scratch/booshra/50/TrainFrames'
-# val_image_dir = '/scratch/booshra/50/ValFrames'
-# test_image_dir = './TestFrames'
+train_image_dir = '/scratch/booshra/50/TrainFrames'
+val_image_dir = '/scratch/booshra/50/ValFrames'
+test_image_dir = '/scratch/booshra/50/TestFrames'
 
 # List of phase names as your classes
 phases = ["Paracentesis", "Viscoelastic", "Wound", "Capsulorhexis", "Hydrodissection", 
@@ -46,8 +46,8 @@ class SurgicalPhaseDataset(Dataset):
         label = phases.index(label)
         if self.transform:
             image = self.transform(image)
-        filename = filename_content[1]  # Get the filename
-        timestamp = float(filename_content[-1].split('.')[0])  # Assuming timestamp is the last component
+        filename = filename_content[1]  
+        timestamp = float(filename_content[-1].split('.')[0])  
         return image, label, filename, timestamp  # Return image, label, filename, and timestamp
     
     
@@ -70,9 +70,9 @@ test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
 
 # Create dataloaders
-train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4)
-val_dataloader = DataLoader(val_dataset, batch_size=4, shuffle=True, num_workers=4)
-test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True, num_workers=4)
+train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=4)
+val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
+test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=4)
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -85,11 +85,6 @@ optimizer = optim.Adam(resnet.parameters(), lr=0.001)
 # Initialize the scheduler
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-# Check if CUDA is available, else use CPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Move the model to the device
-resnet.to(device)
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
@@ -104,7 +99,6 @@ for epoch in range(5):
     total = 0
 
     for inputs, labels, filename, timestamp in train_dataloader:
-        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         optimizer.zero_grad()
@@ -169,7 +163,6 @@ results_data = []  # List to store data for final dataframe
 
 with torch.no_grad():
     for inputs, labels, filenames, timestamps in test_dataloader:
-        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         test_loss += loss.item()
@@ -180,9 +173,9 @@ with torch.no_grad():
         # Iterate over each sample in the batch
         for i in range(len(filenames)):
             filename = filenames[i]
-            timestamp = float(timestamps[i].item())
-            phase = phases[preds[i]]  # Get predicted phase
-            true_label = phases[labels[i]]  # Get true phase label
+            timestamp = timestamps[i].item()
+            phase = phases[preds[i]]  
+            true_label = phases[labels[i]]  
             
             # Append data to results list
             results_data.append({'Filename': filename, 'Timestamp': timestamp, 'Predicted Phase': phase, 'True Phase': true_label})
