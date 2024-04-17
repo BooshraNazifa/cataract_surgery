@@ -11,8 +11,6 @@ from sklearn.model_selection import train_test_split
 from einops.layers.torch import Rearrange
 from einops import rearrange
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
-import imageio
-import random
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP

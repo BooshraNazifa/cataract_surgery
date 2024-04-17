@@ -85,6 +85,12 @@ optimizer = optim.Adam(resnet.parameters(), lr=0.001)
 # Initialize the scheduler
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
+model_path = './model_checkpoint.pth'
+
+
+if os.path.exists(model_path):
+    resnet.load_state_dict(torch.load(model_path))
+    print("Model loaded successfully.")
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
@@ -137,7 +143,13 @@ for epoch in range(5):
     # Checkpointing
     if epoch_val_loss < best_val_loss:
         best_val_loss = epoch_val_loss
-        torch.save(resnet.state_dict(), 'model_checkpoint.pth')
+        checkpoint = {
+            'model_state_dict': resnet.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'best_val_loss': best_val_loss
+        }
+        torch.save(checkpoint, model_path)
         print('Validation loss decreased, saving checkpoint')
 
 # Calculate overall accuracies
