@@ -17,8 +17,10 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 videos_dir = "./Videos"
 
-# Load the Excel file for ground truth
-df = pd.read_excel('./tool_detection.xlsx')
+## Load the Excel file for Phase detection results
+
+df = pd.read_excel('./test_results_by_phase.xlsx')
+
 # Function to convert time strings to seconds
 def time_to_seconds(time_str):
     if pd.isna(time_str):
@@ -31,7 +33,8 @@ capsulorhexis_row = df[df['Unnamed: 0'] == 'Capsulorhexis'].iloc[0]
 
 phase_times = {}
 for i in range(1, len(capsulorhexis_row), 2):  
-    video_id = df.columns[i].strip()  
+    video_id = df.columns[i].strip() 
+    video_id = video_id.split(' ')[0]
     start_time = capsulorhexis_row[i]
     end_time = capsulorhexis_row[i+1]
     
@@ -43,7 +46,6 @@ for i in range(1, len(capsulorhexis_row), 2):
 
 
 print(f"Phase and start/end times {phase_times}")
-
 
 
 

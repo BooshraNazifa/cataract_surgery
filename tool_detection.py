@@ -11,13 +11,15 @@ from sklearn.model_selection import train_test_split
 from einops.layers.torch import Rearrange
 from einops import rearrange
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
+import imageio
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
     
 # Example of creating the dataset
-videos_dir = "/scratch/booshra/tool"
+videos_dir = "./Videos"
+
 
 def load_data_from_directory(directory):
     csv_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith('.csv')]
@@ -42,7 +44,7 @@ def tools_to_vector(tools):
     return [1 if tool in tools else 0 for tool in all_tools]
 
 # Directory containing CSV files
-csv_directory = '/home/booshra/final_project/cataract_surgery/Cataract_Tools'
+csv_directory = './Cataract_Tools'
 df = load_data_from_directory(csv_directory)
 print(df.head())
 
@@ -120,25 +122,31 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, idx):
         video_path = self.video_files[idx]
+        reader = imageio.get_reader(video_path)
         frames = []
-        try:    
-            with imageio.get_reader(video_path) as reader:
-                for i, frame in enumerate(reader):    
-                    if i % 5 == 0:  
-                        image = Image.fromarray(frame)
-                        if self.transform:
-                            image = self.transform(image)
-                        frames.append(image)
+        try:
+            for frame in reader:
+                # Convert frame to RGB if needed, imageio provides frames as numpy arrays
+                if frame.ndim == 3 and frame.shape[2] == 3:  # Check if frame is already in RGB
+                    image = Image.fromarray(frame)
+                else:
+                    image = Image.fromarray(frame[:, :, :3])
+
+                if self.transform:
+                    image = self.transform(image)
+                frames.append(image)
         except Exception as e:
             print(f"Failed to process video {video_path}: {str(e)}")
-            return torch.empty(0, 3, 256, 256), torch.zeros(10)
 
-        if not frames:
-            return torch.empty(0, 3, 256, 256), torch.zeros(10) 
+        reader.close()
+
+        if len(frames) == 0:
+            print(f"No frames were read from the video: {video_path}")
+            return torch.tensor([]), torch.tensor([])  # Handling failure
 
         frames_tensor = torch.stack(frames)
         if idx in self.annotations:
-            tools_vector = torch.tensor(self.annotations.get(idx, np.zeros(10)), dtype=torch.float32)
+            tools_vector = torch.tensor(self.annotations[idx], dtype=torch.float32)
         else:
             print(f"Warning: Fallback for missing annotation at index {idx}.")
             tools_vector = torch.zeros(10, dtype=torch.float32)
@@ -154,8 +162,7 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=5, replace=False)
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)  
+train_ids, test_ids = train_test_split(video_ids, test_size=4, random_state=42)  
 train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
 
 
@@ -223,7 +230,34 @@ train_dataset = VideoDataset(train_files, train_annotations, transform=transform
 val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
 test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
 
+# Create data loaders
+train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
+
+from transformers import VivitModel
+# Assume the model and necessary imports are defined
+# model = ViViT(num_frames=16, num_classes=len(df.iloc[0]['Tools']), image_size=256, patch_size=16)
+
+
+class CustomVivit(nn.Module):
+    def __init__(self, num_labels):
+        super(CustomVivit, self).__init__()
+        self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
+        self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
+        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  # Adjust according to the number of tools
+        self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
+
+    def forward(self, inputs):
+        outputs = self.vivit(inputs)  # Get the base model outputs
+        x = self.dropout(outputs.pooler_output)  # Use pooled output for classification
+        x = self.classifier(x)  # Get raw scores for each class
+        x = self.sigmoid(x)  # Convert to probabilities per class
+        return x
+
+# Initialize model with the number of labels/tools
+num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
 
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -272,7 +306,8 @@ def main(rank, world_size):
     setup(rank, world_size)
 
     # Model and DataLoader setup
-    model = ViViT(num_frames=16, num_classes=len(train_annotations[0]), image_size=256, patch_size=16).to(rank)
+    #model = ViViT(num_frames=16, num_classes=len(train_annotations[0]), image_size=256, patch_size=16).to(rank)
+    model = CustomVivit(num_labels)
     model = DDP(model, device_ids=[rank])
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
