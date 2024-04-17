@@ -12,11 +12,14 @@ from einops.layers.torch import Rearrange
 from einops import rearrange
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
 import imageio
+import random
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
     
 # Example of creating the dataset
 videos_dir = "/scratch/booshra/tool"
-
 
 def load_data_from_directory(directory):
     csv_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith('.csv')]
@@ -41,7 +44,7 @@ def tools_to_vector(tools):
     return [1 if tool in tools else 0 for tool in all_tools]
 
 # Directory containing CSV files
-csv_directory = './Cataract_Tools'
+csv_directory = '/home/booshra/final_project/cataract_surgery/Cataract_Tools'
 df = load_data_from_directory(csv_directory)
 print(df.head())
 
@@ -119,31 +122,25 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, idx):
         video_path = self.video_files[idx]
-        reader = imageio.get_reader(video_path)
         frames = []
-        try:
-            for frame in reader:
-                # Convert frame to RGB if needed, imageio provides frames as numpy arrays
-                if frame.ndim == 3 and frame.shape[2] == 3:  # Check if frame is already in RGB
-                    image = Image.fromarray(frame)
-                else:
-                    image = Image.fromarray(frame[:, :, :3])
-
-                if self.transform:
-                    image = self.transform(image)
-                frames.append(image)
+        try:    
+            with imageio.get_reader(video_path) as reader:
+                for i, frame in enumerate(reader):    
+                    if i % 5 == 0:  
+                        image = Image.fromarray(frame)
+                        if self.transform:
+                            image = self.transform(image)
+                        frames.append(image)
         except Exception as e:
             print(f"Failed to process video {video_path}: {str(e)}")
+            return torch.empty(0, 3, 256, 256), torch.zeros(10)
 
-        reader.close()
-
-        if len(frames) == 0:
-            print(f"No frames were read from the video: {video_path}")
-            return torch.tensor([]), torch.tensor([])  # Handling failure
+        if not frames:
+            return torch.empty(0, 3, 256, 256), torch.zeros(10) 
 
         frames_tensor = torch.stack(frames)
         if idx in self.annotations:
-            tools_vector = torch.tensor(self.annotations[idx], dtype=torch.float32)
+            tools_vector = torch.tensor(self.annotations.get(idx, np.zeros(10)), dtype=torch.float32)
         else:
             print(f"Warning: Fallback for missing annotation at index {idx}.")
             tools_vector = torch.zeros(10, dtype=torch.float32)
@@ -159,14 +156,13 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-# train_ids, test_ids = train_test_split(video_ids, test_size=4, random_state=42)  
-# train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
-train_ids = [video_ids[0]]
-test_ids = [video_ids[1]]
+video_ids = np.random.choice(video_ids, size=5, replace=False)
+train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)  
+train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
 
 
 train_df = df[df['FileName'].isin(train_ids)]
-# val_df = df[df['FileName'].isin(val_ids)]
+val_df = df[df['FileName'].isin(val_ids)]
 test_df = df[df['FileName'].isin(test_ids)]
 
 def verify_videos(video_files):
@@ -221,31 +217,31 @@ def extract_info(df):
 
 
 train_files, train_annotations = extract_info(train_df)
-# val_files, val_annotations = extract_info(val_df)
+val_files, val_annotations = extract_info(val_df)
 test_files, test_annotations = extract_info(test_df)
 
 # Create datasets
 train_dataset = VideoDataset(train_files, train_annotations, transform=transform)
-# val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
+val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
 test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
 
-# Create data loaders
-train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
-# val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
 
+def setup(rank, world_size):
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
 
-# Assume the model and necessary imports are defined
-model = ViViT(num_frames=16, num_classes=len(df.iloc[0]['Tools']), image_size=256, patch_size=16)
-criterion = torch.nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+def cleanup():
+    dist.destroy_process_group()
 
-def train_model(model, criterion, optimizer, train_loader, num_epochs=10):
+def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, rank):
     for epoch in range(num_epochs):
+        print(epoch)
+        train_loader.sampler.set_epoch(epoch)
         model.train()
         total_loss = 0
         for frames, labels in train_loader:
+            frames, labels = frames.to(rank), labels.to(rank)
             optimizer.zero_grad()
             outputs = model(frames)
             loss = criterion(outputs, labels)
@@ -253,28 +249,48 @@ def train_model(model, criterion, optimizer, train_loader, num_epochs=10):
             optimizer.step()
             total_loss += loss.item()
 
-        # # Validation
-        # model.eval()
-        # val_loss = 0
-        # with torch.no_grad():
-        #     for frames, labels in val_loader:
-        #         outputs = model(frames)
-        #         loss = criterion(outputs, labels)
-        #         val_loss += loss.item()
+        if rank == 0:  # Only log on the main process
+            model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for frames, labels in val_loader:
+                    frames, labels = frames.to(rank), labels.to(rank)
+                    outputs = model(frames)
+                    val_loss += criterion(outputs, labels).item()
+            print(f'Epoch {epoch}: Train Loss {total_loss / len(train_loader)}, Val loss={val_loss / len(val_loader)}')
 
-        print(f'Epoch {epoch}: Train Loss {total_loss / len(train_loader)}')
-
-train_model(model, criterion, optimizer, train_loader)
-
-
-def evaluate_model(model, test_loader):
+def evaluate_model(model, test_loader, criterion, rank):
     model.eval()
     test_loss = 0
     with torch.no_grad():
         for frames, labels in test_loader:
+            frames, labels = frames.to(rank), labels.to(rank)
             outputs = model(frames)
-            loss = criterion(outputs, labels)
-            test_loss += loss.item()
-    print(f'Test Loss: {test_loss / len(test_loader)}')
+            test_loss += criterion(outputs, labels).item()
+    if rank == 0:
+        print(f'Test Loss: {test_loss / len(test_loader)}')
 
-evaluate_model(model, test_loader)
+def main(rank, world_size):
+    setup(rank, world_size)
+
+    # Model and DataLoader setup
+    model = ViViT(num_frames=16, num_classes=len(train_annotations[0]), image_size=256, patch_size=16).to(rank)
+    model = DDP(model, device_ids=[rank])
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # DataLoaders with DistributedSampler
+    train_sampler = DistributedSampler(train_dataset, shuffle=True)
+    val_sampler = DistributedSampler(val_dataset, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=2, sampler=train_sampler)
+    val_loader = DataLoader(val_dataset, batch_size=1, sampler=val_sampler)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)  
+
+    train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, rank=rank)
+    evaluate_model(model, test_loader, criterion, rank)
+
+    cleanup()
+
+if __name__ == "__main__":
+    world_size = torch.cuda.device_count()
+    torch.multiprocessing.spawn(main, args=(world_size,), nprocs=world_size, join=True)
