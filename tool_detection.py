@@ -230,11 +230,6 @@ train_dataset = VideoDataset(train_files, train_annotations, transform=transform
 val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
 test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
 
-# Create data loaders
-train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
-
 
 from transformers import VivitModel
 # Assume the model and necessary imports are defined
@@ -258,6 +253,7 @@ class CustomVivit(nn.Module):
 
 # Initialize model with the number of labels/tools
 num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -273,6 +269,7 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         model.train()
         total_loss = 0
         for frames, labels in train_loader:
+            frames, labels = frames.to(device), labels.to(device)
             frames, labels = frames.to(rank), labels.to(rank)
             optimizer.zero_grad()
             outputs = model(frames)
@@ -309,6 +306,7 @@ def main(rank, world_size):
     #model = ViViT(num_frames=16, num_classes=len(train_annotations[0]), image_size=256, patch_size=16).to(rank)
     model = CustomVivit(num_labels)
     model = DDP(model, device_ids=[rank])
+    model = model.to(device)
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 

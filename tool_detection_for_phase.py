@@ -184,6 +184,8 @@ class CustomVivit(nn.Module):
 # Initialize model with the number of labels/tools
 num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
 model = CustomVivit(num_labels)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
 
 optimizer = AdamW(model.parameters(), lr=1e-4)
 criterion = BCEWithLogitsLoss()
@@ -195,6 +197,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
     for epoch in range(num_epochs):
         print(f"Starting Epoch {epoch}")
         for videos, labels in dataloader:
+            videos, labels = videos.to(device), labels.to(device)
             optimizer.zero_grad()
 
             # Enable automatic mixed precision
@@ -212,7 +215,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
         val_loss = 0.0
         correct = 0
         total = 0
-        with torch.no_grad():  # No gradients needed for validation
+        with torch.no_grad():  # No gradients needed for validation 
             for videos, labels in val_dataloader:
                 with autocast():
                     outputs = model(videos)

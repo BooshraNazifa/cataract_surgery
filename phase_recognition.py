@@ -77,6 +77,8 @@ test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_worke
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
 resnet.fc = nn.Linear(resnet.fc.in_features, 14)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+resnet = resnet.to(device)
 
 # Loss Function and Optimizer
 criterion = nn.CrossEntropyLoss()
@@ -105,6 +107,7 @@ for epoch in range(5):
     total = 0
 
     for inputs, labels, filename, timestamp in train_dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         optimizer.zero_grad()
