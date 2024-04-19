@@ -63,13 +63,15 @@ transform = transforms.Compose([
 
 
 # Create dataset
+print("Loading Train Dataset...")
 train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+print("Loading Validation Dataset...")
 val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
+print("Loading Test Dataset...")
 test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
-
-
 # Create dataloaders
+print("Creating Dataloaders...")
 train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=4)
 val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=4)
@@ -130,6 +132,7 @@ for epoch in range(5):
     total = 0
     with torch.no_grad():
         for inputs, labels, filename, timestamp  in val_dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
             outputs = resnet(inputs)
             loss = criterion(outputs, labels)
             val_loss += loss.item()
@@ -178,6 +181,7 @@ results_data = []  # List to store data for final dataframe
 
 with torch.no_grad():
     for inputs, labels, filenames, timestamps in test_dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         test_loss += loss.item()

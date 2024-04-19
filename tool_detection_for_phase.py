@@ -8,14 +8,14 @@ from transformers import VivitModel
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import Compose, Resize, Normalize, ToTensor
 from torchvision.io import read_video
-from transformers import AdamW
+from torch.optim import AdamW
 from torch.nn import BCEWithLogitsLoss
 import torch
 from torch.cuda.amp import autocast, GradScaler
 from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-videos_dir = "./Videos"
+videos_dir = "/scratch/booshra/tool"
 
 # Load the Excel file for ground truth
 df = pd.read_excel('./tool_detection.xlsx')
@@ -43,8 +43,6 @@ for i in range(1, len(capsulorhexis_row), 2):
 
 
 print(f"Phase and start/end times {phase_times}")
-
-
 
 
 def tools_to_vector(tools):
@@ -97,7 +95,7 @@ video_ids = dataframe['FileName'].unique()
 print(video_ids)
 video_ids = np.random.choice(video_ids, size=5, replace=False)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)  
-train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
+train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42) 
 
 
 train_df = dataframe[dataframe['FileName'].isin(train_ids)]
@@ -187,7 +185,7 @@ model = CustomVivit(num_labels)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
-optimizer = AdamW(model.parameters(), lr=1e-4)
+optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
 def train_model(dataloader, model, criterion, optimizer, num_epochs=3):

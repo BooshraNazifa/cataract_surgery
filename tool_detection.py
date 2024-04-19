@@ -18,7 +18,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
     
 # Example of creating the dataset
-videos_dir = "./Videos"
+videos_dir = "/scratch/booshra/tool"
 
 
 def load_data_from_directory(directory):
@@ -162,8 +162,8 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-train_ids, test_ids = train_test_split(video_ids, test_size=4, random_state=42)  
-train_ids, val_ids = train_test_split(train_ids, test_size=2/8, random_state=42) 
+train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)  
+train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42) 
 
 
 train_df = df[df['FileName'].isin(train_ids)]
@@ -256,11 +256,20 @@ num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def setup(rank, world_size):
+    # Initialize the distributed environment.
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
+    torch.cuda.set_device(rank) 
 
 def cleanup():
     dist.destroy_process_group()
+
+def save_checkpoint(model, optimizer, epoch, filename):
+    state = {
+        'epoch': epoch,
+        'state_dict': model.state_dict(),
+        'optimizer': optimizer.state_dict()
+    }
+    torch.save(state, filename)
 
 def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, rank):
     for epoch in range(num_epochs):
@@ -269,7 +278,6 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         model.train()
         total_loss = 0
         for frames, labels in train_loader:
-            frames, labels = frames.to(device), labels.to(device)
             frames, labels = frames.to(rank), labels.to(rank)
             optimizer.zero_grad()
             outputs = model(frames)
@@ -279,6 +287,7 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
             total_loss += loss.item()
 
         if rank == 0:  # Only log on the main process
+            save_checkpoint(model, optimizer, epoch, f'checkpoint_epoch_{epoch}.pth')
             model.eval()
             val_loss = 0
             with torch.no_grad():
@@ -299,14 +308,22 @@ def evaluate_model(model, test_loader, criterion, rank):
     if rank == 0:
         print(f'Test Loss: {test_loss / len(test_loader)}')
 
+
 def main(rank, world_size):
+    # Set up the specific GPU to be used by this process
+    torch.cuda.set_device(rank)
+    device = torch.device(f"cuda:{rank}")
+
+    # Initialize and set up the distributed environment
     setup(rank, world_size)
 
-    # Model and DataLoader setup
-    #model = ViViT(num_frames=16, num_classes=len(train_annotations[0]), image_size=256, patch_size=16).to(rank)
-    model = CustomVivit(num_labels)
+    # Initialize your model and move it to the correct device
+    model = CustomVivit(num_labels).to(device)
+    
+    # Wrap the model with DistributedDataParallel
     model = DDP(model, device_ids=[rank])
-    model = model.to(device)
+
+    # Define loss function and optimizer
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -317,9 +334,11 @@ def main(rank, world_size):
     val_loader = DataLoader(val_dataset, batch_size=1, sampler=val_sampler)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)  
 
+    # Train and evaluate the model
     train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, rank=rank)
     evaluate_model(model, test_loader, criterion, rank)
 
+    # Clean up the distributed environment
     cleanup()
 
 if __name__ == "__main__":

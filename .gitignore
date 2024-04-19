@@ -6,3 +6,4 @@ ValFrames/
 Files/
 model_checkpoint.pth
 test_results.xlsx
+test_results_by_phase.xlsx
