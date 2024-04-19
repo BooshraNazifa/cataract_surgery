@@ -14,6 +14,9 @@ import torch
 from torch.cuda.amp import autocast, GradScaler
 from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 videos_dir = "/scratch/booshra/tool"
 
@@ -129,7 +132,6 @@ class VideoDataset(torch.utils.data.Dataset):
         # Load the video
         video, _, info = read_video(video_path, pts_unit='sec')
         
-        # Find the frame that corresponds to the time recorded
         fps = info['video_fps']  # frames per second
         frame_idx = int(time_recorded * fps)  # convert time to frame number
         
@@ -147,7 +149,6 @@ class VideoDataset(torch.utils.data.Dataset):
 
         return frame, labels
 
-    
 
 transform = Compose([
     Resize((224, 224)),
@@ -156,10 +157,7 @@ transform = Compose([
 ])
 
 train_dataset = VideoDataset(train_df, videos_dir, transform=transform)
-train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True)
-
 val_dataset = VideoDataset(val_df, videos_dir, transform=transform)
-val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True)
 
 test_dataset = VideoDataset(test_df, videos_dir, transform=transform)
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
@@ -168,45 +166,49 @@ class CustomVivit(nn.Module):
     def __init__(self, num_labels):
         super(CustomVivit, self).__init__()
         self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
-        self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
-        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  # Adjust according to the number of tools
-        self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
+        self.dropout = nn.Dropout(0.5)
+        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, inputs):
-        outputs = self.vivit(inputs)  # Get the base model outputs
-        x = self.dropout(outputs.pooler_output)  # Use pooled output for classification
-        x = self.classifier(x)  # Get raw scores for each class
-        x = self.sigmoid(x)  # Convert to probabilities per class
+        outputs = self.vivit(inputs)
+        x = self.dropout(outputs.pooler_output)
+        x = self.classifier(x)
+        x = self.sigmoid(x)
         return x
 
-# Initialize model with the number of labels/tools
-num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
-model = CustomVivit(num_labels)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = model.to(device)
+def setup(rank, world_size):
+    torch.distributed.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
 
-optimizer = AdamW(model.parameters(), lr=0.001)
-criterion = BCEWithLogitsLoss()
+def cleanup():
+    torch.distributed.destroy_process_group()
 
-def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
-    model.train()
+def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, rank):
+    device = torch.device(f"cuda:{rank}")
+    model.to(device)
     scaler = GradScaler()  
 
     for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0
+        total_batches = len(train_loader)
         print(f"Starting Epoch {epoch}")
-        for videos, labels in dataloader:
+        for videos, labels in train_loader:
             videos, labels = videos.to(device), labels.to(device)
             optimizer.zero_grad()
 
-            # Enable automatic mixed precision
             with autocast():
-                outputs = model(videos)  # Forward pass with mixed precision
-                loss = criterion(outputs.logits, labels)  # Calculate loss
+                outputs = model(videos)
+                loss = criterion(outputs.logits, labels)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            print(f"Epoch {epoch}, Loss: {loss.item()}")
+            total_loss += loss.item()
+
+        avg_loss = total_loss / total_batches
+        print(f'Epoch {epoch}: Train Loss {avg_loss}')
 
         # Validation phase
         model.eval()  # Set the model to evaluation mode
@@ -214,8 +216,9 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
         correct = 0
         total = 0
         with torch.no_grad():  # No gradients needed for validation 
-            for videos, labels in val_dataloader:
+            for videos, labels in val_loader:
                 with autocast():
+                    videos, labels = videos.to(device), labels.to(device)
                     outputs = model(videos)
                     loss = criterion(outputs.logits, labels)
                     val_loss += loss.item() * videos.size(0)
@@ -225,14 +228,12 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                     total += labels.size(0)
                     correct += (predicted == labels).sum().item()
 
-        avg_val_loss = val_loss / len(val_dataloader.dataset)
+        avg_val_loss = val_loss / len(val_loader.dataset)
         val_accuracy = correct / total
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
 
 
         print(f"Epoch {epoch} complete.")
-
-train_model(train_dataloader, model, criterion, optimizer)
 
 def evaluate_model(dataloader, model):
     model.eval()  # Set the model to evaluation mode
@@ -258,4 +259,30 @@ def evaluate_model(dataloader, model):
     print(f"Recall: {recall:.4f}")
     print(f"F1 Score: {f1:.4f}")
 
-evaluate_model(test_dataloader, model)
+def main(rank, world_size):
+    setup(rank, world_size)
+
+    num_labels = len(all_tools)  # Define this appropriately
+    device = torch.device(f"cuda:{rank}")
+
+    model = CustomVivit(num_labels).to(device)
+    model = DDP(model, device_ids=[rank])
+
+    criterion = BCEWithLogitsLoss()
+    optimizer = AdamW(model.parameters(), lr=0.001)
+
+    train_sampler = DistributedSampler(train_dataset, shuffle=True, num_replicas=world_size, rank=rank)
+    train_loader = DataLoader(train_dataset, batch_size=2, sampler=train_sampler)
+
+    val_sampler = DistributedSampler(val_dataset, shuffle=False, num_replicas=world_size, rank=rank)
+    val_loader = DataLoader(val_dataset, batch_size=1, sampler=val_sampler)
+
+    train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, rank=rank)
+    if rank == 0:
+        evaluate_model(test_dataloader, model)
+
+    cleanup()
+
+if __name__ == "__main__":
+    world_size = torch.cuda.device_count()
+    torch.multiprocessing.spawn(main, args=(world_size,), nprocs=world_size, join=True)

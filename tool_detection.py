@@ -251,9 +251,7 @@ class CustomVivit(nn.Module):
         x = self.sigmoid(x)  # Convert to probabilities per class
         return x
 
-# Initialize model with the number of labels/tools
-num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def setup(rank, world_size):
     # Initialize the distributed environment.
@@ -313,6 +311,7 @@ def main(rank, world_size):
     # Set up the specific GPU to be used by this process
     torch.cuda.set_device(rank)
     device = torch.device(f"cuda:{rank}")
+    num_labels = len(all_tools)  
 
     # Initialize and set up the distributed environment
     setup(rank, world_size)
