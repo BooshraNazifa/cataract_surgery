@@ -114,7 +114,7 @@ transform = Compose([
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42)
+train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 
 
 train_df = df[df['FileName'].isin(train_ids)]
@@ -220,16 +220,15 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
             frames, labels = frames.to(device), labels.to(device)
             outputs = model(frames)
             loss = criterion(outputs, labels) / accumulation_steps  # Scale loss to account for accumulation
-            loss.backward()  # Accumulate gradients
-            total_train_loss += loss.item() * accumulation_steps  # Unscaled loss for accurate tracking
+            loss.backward()  
+            total_train_loss += loss.item() * accumulation_steps  
 
-            # Perform optimization every 'accumulation_steps' steps
+            
             if (step + 1) % accumulation_steps == 0:
                 optimizer.step()  # Update parameters
                 optimizer.zero_grad()
 
-        # Handle case where number of batches isn't a multiple of 'accumulation_steps'
-        # This ensures all accumulated gradients are used
+        
         if len(train_loader) % accumulation_steps != 0:
             optimizer.step()
             optimizer.zero_grad()

@@ -97,10 +97,9 @@ print(dataframe)
 # Splitting the data into training, validation, and testing
 video_ids = dataframe['FileName'].unique()
 print(video_ids)
-video_ids = np.random.choice(video_ids, size=3, replace=False)
+# video_ids = np.random.choice(video_ids, size=3, replace=False)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42)
-
+train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 
 train_df = dataframe[dataframe['FileName'].isin(train_ids)]
 val_df = dataframe[dataframe['FileName'].isin(val_ids)]

@@ -48,7 +48,7 @@ class SurgicalPhaseDataset(Dataset):
             image = self.transform(image)
         filename = filename_content[1]  
         timestamp = float(filename_content[-1].split('.')[0])  
-        return image, label, filename, timestamp  # Return image, label, filename, and timestamp
+        return image, label, filename, timestamp  
     
     
 
