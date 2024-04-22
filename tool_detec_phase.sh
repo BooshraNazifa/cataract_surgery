@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:v100:2
+#SBATCH --gres=gpu:v100:1
 #SBATCH --mem=140G
 #SBATCH --time=25:00:00
 #SBATCH --output=tool_phase_ground-%j.out

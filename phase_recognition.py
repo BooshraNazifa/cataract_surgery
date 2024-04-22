@@ -10,7 +10,7 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-from sklearn.metrics import precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score, classification_report, confusion_matrix
 
 
 # # Directory containing your images
@@ -72,9 +72,9 @@ test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
 # Create dataloaders
 print("Creating Dataloaders...")
-train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=4)
-val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
-test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=4)
+train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=2)
+val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=2)
+test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=2)
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -93,7 +93,7 @@ model_path = './model_checkpoint.pth'
 
 
 if os.path.exists(model_path):
-    resnet.load_state_dict(torch.load(model_path))
+    resnet.load_state_dict(torch.load(model_path, map_location='cuda'))
     print("Model loaded successfully.")
 
 train_losses, val_losses = [], []
@@ -211,6 +211,8 @@ precision = precision_score(true_labels, all_preds, average='weighted')
 recall = recall_score(true_labels, all_preds, average='weighted')
 f1 = f1_score(true_labels, all_preds, average='weighted')
 test_accuracy = correct / total
+conf_matrix = confusion_matrix(true_labels, all_preds)
+
 
 
 # Print evaluation metrics

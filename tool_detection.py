@@ -1,5 +1,5 @@
 import pandas as pd
-import ast 
+import ast
 import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
@@ -12,11 +12,12 @@ from einops.layers.torch import Rearrange
 from einops import rearrange
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
 import imageio
-import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel import DistributedDataParallel as DDP
+import torch
+from torchvision.transforms.functional import pad
+from PIL import Image
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
-    
+
 # Example of creating the dataset
 videos_dir = "/scratch/booshra/tool"
 
@@ -54,116 +55,66 @@ all_tools = sorted(set(tool for sublist in df['Tool Names'] for tool in sublist)
 df['Tools'] = df['Tool Names'].apply(tools_to_vector)
 print(df.head())
 
-class PatchEmbedding(nn.Module):
-    def __init__(self, in_channels=3, patch_size=16, emb_size=768):
-        super().__init__()
-        self.patch_size = patch_size
-        self.projection = nn.Sequential(
-            # Break the image into patches and flatten them
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
-            nn.Linear(patch_size * patch_size * in_channels, emb_size)
-        )
-
-    def forward(self, x):
-        x = self.projection(x)
-        return x
-
-class ViViT(nn.Module):
-    def __init__(self, num_frames, num_classes, image_size=224, patch_size=16, emb_size=768, depth=6, heads=8, mlp_dim=1024):
-        super().__init__()
-        self.patch_embedding = PatchEmbedding(patch_size=patch_size, emb_size=emb_size)
-        
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_size))
-        self.positional_embedding = nn.Parameter(torch.randn((image_size // patch_size) ** 2 + 1, emb_size))
-        self.temporal_embedding = nn.Parameter(torch.randn(num_frames, emb_size))
-
-        self.transformer = nn.Transformer(emb_size, nhead=heads, num_encoder_layers=depth, dim_feedforward=mlp_dim)
-
-        self.to_cls_token = nn.Identity()
-
-        self.mlp_head = nn.Sequential(
-            nn.Linear(emb_size, mlp_dim),
-            nn.ReLU(),
-            nn.Linear(mlp_dim, num_classes)
-        )
-
-    def forward(self, x):
-        # x shape: (batch, frames, channels, height, width)
-        b, t, c, h, w = x.shape
-        x = rearrange(x, 'b t c h w -> (b t) c h w')
-        x = self.patch_embedding(x)
-        x = rearrange(x, '(b t) n d -> b (t n) d', t=t)
-        
-        cls_tokens = self.cls_token.expand(b, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x += self.positional_embedding
-        x += rearrange(self.temporal_embedding, 't d -> 1 t d')
-        
-        x = rearrange(x, 'b n d -> n b d')
-        x = self.transformer(x)
-        x = rearrange(x, 'n b d -> b n d')
-        
-        x = x[:, 0]
-        
-        x = self.to_cls_token(x)
-        x = self.mlp_head(x)
-        
-        return x
-
-
-class VideoDataset(Dataset):
-    def __init__(self, video_files, annotations, transform=None):
+class VideoDataset(torch.utils.data.Dataset):
+    def __init__(self, video_files, annotations, transform=None, fixed_frame_count=32):
         self.video_files = video_files
         self.annotations = annotations
         self.transform = transform
+        self.fixed_frame_count = fixed_frame_count  # Set a fixed number of frames for each video
 
     def __len__(self):
         return len(self.video_files)
 
     def __getitem__(self, idx):
         video_path = self.video_files[idx]
-        reader = imageio.get_reader(video_path)
-        frames = []
-        try:
-            for frame in reader:
-                # Convert frame to RGB if needed, imageio provides frames as numpy arrays
-                if frame.ndim == 3 and frame.shape[2] == 3:  # Check if frame is already in RGB
-                    image = Image.fromarray(frame)
-                else:
-                    image = Image.fromarray(frame[:, :, :3])
+        frames = self.load_video_frames(video_path)
+        frames = self.adjust_frame_count(frames)
 
-                if self.transform:
-                    image = self.transform(image)
-                frames.append(image)
-        except Exception as e:
-            print(f"Failed to process video {video_path}: {str(e)}")
-
-        reader.close()
-
-        if len(frames) == 0:
-            print(f"No frames were read from the video: {video_path}")
-            return torch.tensor([]), torch.tensor([])  # Handling failure
-
-        frames_tensor = torch.stack(frames)
-        if idx in self.annotations:
-            tools_vector = torch.tensor(self.annotations[idx], dtype=torch.float32)
-        else:
-            print(f"Warning: Fallback for missing annotation at index {idx}.")
-            tools_vector = torch.zeros(10, dtype=torch.float32)
+        # Convert frames to tensors
+        frames_tensor = torch.stack([self.transform(frame) for frame in frames])
+        tools_vector = self.get_tools_vector(idx)
 
         return frames_tensor, tools_vector
 
-# Example transform (adjust as needed)
+    def load_video_frames(self, video_path):
+        """ Load video frames using imageio. """
+        frames = []
+        try:
+            with imageio.get_reader(video_path) as reader:
+                for frame in reader:
+                    image = Image.fromarray(frame)
+                    frames.append(image)
+        except Exception as e:
+            print(f"Failed to load video {video_path}: {e}")
+        return frames
+    
+    def adjust_frame_count(self, frames):
+        """ Adjust the number of frames to the fixed_frame_count by padding or truncating. """
+        if len(frames) > self.fixed_frame_count:
+            return frames[:self.fixed_frame_count]  # Truncate to fixed frame count
+        elif len(frames) < self.fixed_frame_count:
+            # Pad with the last frame if not enough frames
+            last_frame = frames[-1] if frames else Image.new('RGB', (256, 256), color = 'black')
+            frames.extend([last_frame] * (self.fixed_frame_count - len(frames)))
+        return frames
+
+    def get_tools_vector(self, idx):
+        """ Retrieve or generate tools vector for annotations. """
+        if idx in self.annotations:
+            return torch.tensor(self.annotations[idx], dtype=torch.float32)
+        else:
+            return torch.zeros(10, dtype=torch.float32)
+        
 transform = Compose([
-    Resize((256, 256)),
+    Resize((224, 224)),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Standard ImageNet normalization
 ])
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)  
-train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42) 
+train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
+train_ids, val_ids = train_test_split(train_ids, test_size=1, random_state=42)
 
 
 train_df = df[df['FileName'].isin(train_ids)]
@@ -182,7 +133,6 @@ def verify_videos(video_files):
             print(f"Failed to open or read video file {video_file}: {e}")
     return verified_videos
 
-# Helper function to extract paths and annotations from DataFrame
 def find_file_with_extension(base_path, filename, extensions):
     for ext in extensions:
         full_path = os.path.join(base_path, f"{filename}{ext}")
@@ -219,8 +169,6 @@ def extract_info(df):
     video_files = verify_videos(video_files)
     return video_files, annotations
 
-
-
 train_files, train_annotations = extract_info(train_df)
 val_files, val_annotations = extract_info(val_df)
 test_files, test_annotations = extract_info(test_df)
@@ -230,6 +178,9 @@ train_dataset = VideoDataset(train_files, train_annotations, transform=transform
 val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
 test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
 
+train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
 from transformers import VivitModel
 # Assume the model and necessary imports are defined
@@ -252,94 +203,79 @@ class CustomVivit(nn.Module):
         return x
 
 
+num_labels = len(all_tools)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = CustomVivit(num_labels).to(device)
 
-def setup(rank, world_size):
-    # Initialize the distributed environment.
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank) 
+criterion = torch.nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-def cleanup():
-    dist.destroy_process_group()
-
-def save_checkpoint(model, optimizer, epoch, filename):
-    state = {
-        'epoch': epoch,
-        'state_dict': model.state_dict(),
-        'optimizer': optimizer.state_dict()
-    }
-    torch.save(state, filename)
-
-def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, rank):
+def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, accumulation_steps=4):
     for epoch in range(num_epochs):
-        print(epoch)
-        train_loader.sampler.set_epoch(epoch)
+        print(f"Epoch {epoch + 1}/{num_epochs}")
+
         model.train()
-        total_loss = 0
-        for frames, labels in train_loader:
-            frames, labels = frames.to(rank), labels.to(rank)
-            optimizer.zero_grad()
+        total_train_loss = 0
+        for step, (frames, labels) in enumerate(train_loader):
+            frames, labels = frames.to(device), labels.to(device)
             outputs = model(frames)
-            loss = criterion(outputs, labels)
-            loss.backward()
+            loss = criterion(outputs, labels) / accumulation_steps  # Scale loss to account for accumulation
+            loss.backward()  # Accumulate gradients
+            total_train_loss += loss.item() * accumulation_steps  # Unscaled loss for accurate tracking
+
+            # Perform optimization every 'accumulation_steps' steps
+            if (step + 1) % accumulation_steps == 0:
+                optimizer.step()  # Update parameters
+                optimizer.zero_grad()
+
+        # Handle case where number of batches isn't a multiple of 'accumulation_steps'
+        # This ensures all accumulated gradients are used
+        if len(train_loader) % accumulation_steps != 0:
             optimizer.step()
-            total_loss += loss.item()
+            optimizer.zero_grad()
 
-        if rank == 0:  # Only log on the main process
-            save_checkpoint(model, optimizer, epoch, f'checkpoint_epoch_{epoch}.pth')
-            model.eval()
-            val_loss = 0
-            with torch.no_grad():
-                for frames, labels in val_loader:
-                    frames, labels = frames.to(rank), labels.to(rank)
-                    outputs = model(frames)
-                    val_loss += criterion(outputs, labels).item()
-            print(f'Epoch {epoch}: Train Loss {total_loss / len(train_loader)}, Val loss={val_loss / len(val_loader)}')
+        # Calculate average training loss for the epoch
+        average_train_loss = total_train_loss / len(train_loader.dataset)
 
-def evaluate_model(model, test_loader, criterion, rank):
+        # Validation phase
+        model.eval()
+        total_val_loss = 0
+        with torch.no_grad():
+            for frames, labels in val_loader:
+                frames, labels = frames.to(device), labels.to(device)
+                outputs = model(frames)
+                val_loss = criterion(outputs, labels)
+                total_val_loss += val_loss.item()
+
+        # Calculate average validation loss for the epoch
+        average_val_loss = total_val_loss / len(val_loader.dataset)
+        print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
+
+def evaluate_model(model, test_loader, criterion):
     model.eval()
     test_loss = 0
+    all_preds = []
+    all_labels = []
     with torch.no_grad():
         for frames, labels in test_loader:
-            frames, labels = frames.to(rank), labels.to(rank)
+            frames, labels = frames.to(device), labels.to(device)
             outputs = model(frames)
+            preds = torch.sigmoid(outputs).round()
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
             test_loss += criterion(outputs, labels).item()
-    if rank == 0:
-        print(f'Test Loss: {test_loss / len(test_loader)}')
+
+    # Calculate metrics
+    accuracy = accuracy_score(all_labels, all_preds)
+    precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+    recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+    conf_matrix = confusion_matrix(all_labels, all_preds)
+
+    print(f'Test Loss: {test_loss / len(test_loader)}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, '
+          f'Recall: {recall:.4f}, F1 Score: {f1:.4f}')
+    print(f'Confusion Matrix:\n{conf_matrix}')
 
 
-def main(rank, world_size):
-    # Set up the specific GPU to be used by this process
-    torch.cuda.set_device(rank)
-    device = torch.device(f"cuda:{rank}")
-    num_labels = len(all_tools)  
-
-    # Initialize and set up the distributed environment
-    setup(rank, world_size)
-
-    # Initialize your model and move it to the correct device
-    model = CustomVivit(num_labels).to(device)
-    
-    # Wrap the model with DistributedDataParallel
-    model = DDP(model, device_ids=[rank])
-
-    # Define loss function and optimizer
-    criterion = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    # DataLoaders with DistributedSampler
-    train_sampler = DistributedSampler(train_dataset, shuffle=True)
-    val_sampler = DistributedSampler(val_dataset, shuffle=False)
-    train_loader = DataLoader(train_dataset, batch_size=2, sampler=train_sampler)
-    val_loader = DataLoader(val_dataset, batch_size=1, sampler=val_sampler)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)  
-
-    # Train and evaluate the model
-    train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, rank=rank)
-    evaluate_model(model, test_loader, criterion, rank)
-
-    # Clean up the distributed environment
-    cleanup()
-
-if __name__ == "__main__":
-    world_size = torch.cuda.device_count()
-    torch.multiprocessing.spawn(main, args=(world_size,), nprocs=world_size, join=True)
+train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=15, accumulation_steps=4)
+evaluate_model(model, test_loader, criterion)
