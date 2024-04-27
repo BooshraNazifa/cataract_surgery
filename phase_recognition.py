@@ -10,13 +10,8 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-from sklearn.metrics import precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score, classification_report, confusion_matrix
 
-
-# # Directory containing your images
-# train_image_dir = './Files/TrainFrames'
-# val_image_dir = './Files/ValFrames'
-# test_image_dir = './Files/TestFrames'
 
 # Directory containing your images in server
 train_image_dir = '/scratch/booshra/50/TrainFrames'
@@ -39,16 +34,25 @@ class SurgicalPhaseDataset(Dataset):
         return len(self.img_labels)
     
     def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.img_labels[idx])
-        image = read_image(img_path)
-        filename_content = self.img_labels[idx].split('_')
-        label = filename_content[0]
-        label = phases.index(label)
-        if self.transform:
-            image = self.transform(image)
-        filename = filename_content[1]  
-        timestamp = float(filename_content[-1].split('.')[0])  
-        return image, label, filename, timestamp  # Return image, label, filename, and timestamp
+      img_path = os.path.join(self.img_dir, self.img_labels[idx])
+
+      # Check if the image file exists and is not empty
+      if not os.path.exists(img_path) or os.path.getsize(img_path) == 0:
+        print(f"Warning: Skipping empty or non-existent image {img_path}")
+        return None
+
+      image = read_image(img_path)
+      filename_content = self.img_labels[idx].split('_')
+      label = filename_content[0]
+      label = phases.index(label)  # Ensure 'phases' is defined in your scope
+
+      if self.transform:
+        image = self.transform(image)
+
+      filename = filename_content[1]
+      timestamp = float(filename_content[-1].split('.')[0])
+
+      return image, label, filename, timestamp  
     
     
 
@@ -63,16 +67,18 @@ transform = transforms.Compose([
 
 
 # Create dataset
+print("Loading Train Dataset...")
 train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+print("Loading Validation Dataset...")
 val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
+print("Loading Test Dataset...")
 test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 
-
-
 # Create dataloaders
-train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=4)
-val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
-test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=4)
+print("Creating Dataloaders...")
+train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=2)
+val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=2)
+test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=2)
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -87,11 +93,16 @@ optimizer = optim.Adam(resnet.parameters(), lr=0.001)
 # Initialize the scheduler
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-model_path = './model_checkpoint.pth'
+model_path = './model_50_checkpoint.pth'
 
 
 if os.path.exists(model_path):
-    resnet.load_state_dict(torch.load(model_path))
+    checkpoint = torch.load(model_path, map_location='cuda')
+
+    resnet.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    best_val_loss = checkpoint['best_val_loss']
     print("Model loaded successfully.")
 
 train_losses, val_losses = [], []
@@ -99,7 +110,7 @@ train_accs, val_accs = [], []
 best_val_loss = float('inf')
 
 # Training Loop
-for epoch in range(5):
+for epoch in range(10):
     print(epoch)
     resnet.train()
     running_loss = 0.0
@@ -107,18 +118,24 @@ for epoch in range(5):
     total = 0
 
     for inputs, labels, filename, timestamp in train_dataloader:
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = resnet(inputs)
-        loss = criterion(outputs, labels)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        try:
+            if inputs is None or labels is None:
+                continue
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = resnet(inputs)
+            loss = criterion(outputs, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        running_loss += loss.item()
-        _, preds = torch.max(outputs, 1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    
+            running_loss += loss.item()
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+        except Exception as e:
+            print(f"Error during training: {e}")
+            continue
+
     scheduler.step()
     train_losses.append(running_loss / len(train_dataloader))
     train_accs.append(correct / total)
@@ -129,13 +146,20 @@ for epoch in range(5):
     correct = 0
     total = 0
     with torch.no_grad():
-        for inputs, labels, filename, timestamp  in val_dataloader:
-            outputs = resnet(inputs)
-            loss = criterion(outputs, labels)
-            val_loss += loss.item()
-            _, preds = torch.max(outputs, 1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
+        for inputs, labels, filename, timestamp in val_dataloader:
+            try:
+                if inputs is None or labels is None:
+                   continue
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = resnet(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                _, preds = torch.max(outputs, 1)
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+            except Exception as e:
+                print(f"Error during validation: {e}")
+                continue
 
     epoch_val_loss = val_loss / len(val_dataloader)
     epoch_val_acc = correct / total
@@ -152,8 +176,11 @@ for epoch in range(5):
             'scheduler_state_dict': scheduler.state_dict(),
             'best_val_loss': best_val_loss
         }
-        torch.save(checkpoint, model_path)
-        print('Validation loss decreased, saving checkpoint')
+        try:
+            torch.save(checkpoint, model_path)
+            print('Validation loss decreased, saving checkpoint')
+        except Exception as e:
+            print(f"Error saving checkpoint: {e}")
 
 # Calculate overall accuracies
 overall_train_accuracy = sum(train_accs) / len(train_accs)
@@ -165,7 +192,7 @@ overall_val_accuracy_percentage = overall_val_accuracy * 100
 
 print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
 print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
-
+torch.save(resnet, 'resnet_50_complete.pth')
 
 # Test Loop 
 resnet.eval()  
@@ -178,6 +205,7 @@ results_data = []  # List to store data for final dataframe
 
 with torch.no_grad():
     for inputs, labels, filenames, timestamps in test_dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
         outputs = resnet(inputs)
         loss = criterion(outputs, labels)
         test_loss += loss.item()
@@ -209,11 +237,15 @@ f1 = f1_score(true_labels, all_preds, average='weighted')
 test_accuracy = correct / total
 
 
+
 # Print evaluation metrics
 print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
 print(f'Precision: {precision:.4f}')
 print(f'Recall: {recall:.4f}')
 print(f'F1 Score: {f1:.4f}')
+
+conf_matrix = confusion_matrix(true_labels, all_preds)
+print(f'Confusion Matrix:\n{conf_matrix}')
 
 # Find the unique classes present in your test data
 unique_classes = np.unique(true_labels + all_preds)
