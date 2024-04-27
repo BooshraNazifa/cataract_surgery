@@ -91,8 +91,8 @@ print(dataframe)
 
 # Splitting the data into training, validation, and testing
 video_ids = dataframe['FileName'].unique()
+video_ids = np.random.choice(video_ids, size=8, replace=False)
 print(video_ids)
-# video_ids = np.random.choice(video_ids, size=3, replace=False)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 
@@ -109,7 +109,6 @@ class VideoDataset(torch.utils.data.Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.frames_per_clip = frames_per_clip  
-
 
     def __len__(self):
         return len(self.df)
@@ -138,14 +137,12 @@ class VideoDataset(torch.utils.data.Dataset):
         video_clip = video[frame_indices]
 
         if self.transform:
-            # Transform each frame individually if necessary
             video_clip = torch.stack([self.transform(frame) for frame in video_clip])
         video_clip = video_clip.permute(0, 1, 2, 3)
 
         # Prepare labels
         labels = torch.tensor(self.df.iloc[idx]['Tools'], dtype=torch.float32)
-
-        # Ensure video clip is shaped [num_frames, channels, height, width]
+        print(labels)
         return video_clip, labels
     
 def transform_frame(frame):
@@ -193,7 +190,9 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
-def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
+from torch.cuda.amp import autocast, GradScaler
+
+def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulation_steps=4):
     model.train()
     scaler = GradScaler()
 
@@ -201,33 +200,35 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
         print(f"Starting Epoch {epoch}")
         total_train = 0
         total_train_loss = 0
+        optimizer.zero_grad()  
 
-        for videos, labels in dataloader:
+        for i, (videos, labels) in enumerate(dataloader):
             videos, labels = videos.to(device), labels.to(device)
+            try:
+              with autocast():
+                outputs = model(videos)
+                loss = criterion(outputs, labels) / accumulation_steps  
+
+              scaler.scale(loss).backward()
+
+              if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)  
+                scaler.update()
+                optimizer.zero_grad()  
+
+              total_train += labels.numel()
+              total_train_loss += loss.item() * videos.size(0) * accumulation_steps  
+            except RuntimeError as e:
+                   print(f"Skipping a video due to an error: {e}")
+                   continue
+
+        if len(dataloader) % accumulation_steps != 0:
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
 
-            try:
-                # Enable automatic mixed precision
-                with autocast():
-                    outputs = model(videos)
-                    loss = criterion(outputs, labels)
-
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
-
-                total_train += labels.numel()
-                total_train_loss += loss.item() * videos.size(0)
-
-            except RuntimeError as e:
-                print(f"Skipping a video due to an error: {e}")
-                continue
-        
-        avg_train_loss = total_train_loss / len(dataloader.dataset)
+        avg_train_loss = total_train_loss / total_train
         print(f"Epoch {epoch}, Training Loss: {avg_train_loss:.4f}")
-
-
 
         # Validation phase
         model.eval()  # Set the model to evaluation mode
@@ -240,7 +241,6 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                   with autocast():
                     outputs = model(videos)
                     val_loss = criterion(outputs, labels)
-
                     total_val_loss += val_loss.item() * videos.size(0)
 
                     predicted = torch.sigmoid(outputs) > 0.5
@@ -249,9 +249,8 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                 except RuntimeError as e:
                    print(f"Skipping a video due to an error: {e}")
                    continue
-        avg_val_loss = total_val_loss / total_val
-
-        val_accuracy = total_val_correct / total_val
+        avg_val_loss = total_val_loss / total_val if total_val != 0 else 0
+        val_accuracy = total_val_correct / total_val if total_val != 0 else 0
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
 
         print(f"Epoch {epoch} complete.")

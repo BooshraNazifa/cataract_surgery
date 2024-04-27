@@ -72,7 +72,7 @@ class VideoDataset(torch.utils.data.Dataset):
         # Convert frames to tensors
         frames_tensor = torch.stack([self.transform(frame) for frame in frames])
         tools_vector = self.get_tools_vector(idx)
-
+        print(tools_vector)
         return frames_tensor, tools_vector
 
     def load_video_frames(self, video_path):

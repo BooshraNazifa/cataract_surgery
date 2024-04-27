@@ -34,7 +34,6 @@ class SurgicalPhaseDataset(Dataset):
         return len(self.img_labels)
     
     def __getitem__(self, idx):
-
       img_path = os.path.join(self.img_dir, self.img_labels[idx])
 
       # Check if the image file exists and is not empty
@@ -237,9 +236,6 @@ recall = recall_score(true_labels, all_preds, average='weighted')
 f1 = f1_score(true_labels, all_preds, average='weighted')
 test_accuracy = correct / total
 conf_matrix = confusion_matrix(true_labels, all_preds)
-
-
-
 
 # Print evaluation metrics
 print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
