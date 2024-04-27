@@ -179,13 +179,11 @@ class CustomVivit(nn.Module):
         self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
         self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
         self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  # Adjust according to the number of tools
-        self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
 
     def forward(self, inputs):
-        outputs = self.vivit(inputs)  # Get the base model outputs
+        outputs = self.vivit(inputs, return_dict=True)  # Get the base model outputs
         x = self.dropout(outputs.pooler_output)  # Use pooled output for classification
         x = self.classifier(x)  # Get raw scores for each class
-        x = self.sigmoid(x)  # Convert to probabilities per class
         return x
     
 # Initialize model with the number of labels/tools
@@ -206,11 +204,15 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
         total_train_correct = 0
         total_train = 0
         total_train_loss = 0
+<<<<<<< HEAD
 
+=======
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
         for videos, labels in dataloader:
             videos, labels = videos.to(device), labels.to(device)
             optimizer.zero_grad()
 
+<<<<<<< HEAD
             try:
                 # Enable automatic mixed precision
                 with autocast():
@@ -234,6 +236,23 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
         avg_train_loss = total_train_loss / len(dataloader.dataset)
         print(f"Epoch {epoch}, Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}")
 
+=======
+            # Enable automatic mixed precision
+            with autocast():
+                outputs = model(videos.to(device).half()) 
+                loss = criterion(outputs, labels)
+                total_train_loss += loss.item() * videos.size(0)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            predicted = torch.sigmoid(outputs) > 0.5  # Convert logits to binary predictions
+            total_train_correct += (predicted == labels).float().sum().item()
+            total_train += labels.numel()
+
+        train_accuracy = total_train_correct / total_train
+        avg_train_loss = total_train_loss / len(train_dataloader.dataset)
+        print(f"Epoch {epoch}, Training Loss: {avg_train_loss}, Training Accuracy: {train_accuracy:.2f}")
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 
         # Validation phase
         model.eval()  # Set the model to evaluation mode
@@ -246,21 +265,33 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                   with autocast():
                     outputs = model(videos)
                     val_loss = criterion(outputs, labels)
+<<<<<<< HEAD
                     total_val_loss += val_loss.item() * videos.size(0)
+=======
+                    total_val_loss += loss.item() * videos.size(0)
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 
                     predicted = torch.sigmoid(outputs) > 0.5
                     total_val_correct += (predicted == labels).float().sum().item()
                     total_val += labels.numel()
+<<<<<<< HEAD
                 except RuntimeError as e:
                    print(f"Skipping a video due to an error: {e}")
                    continue
         avg_val_loss = total_val_loss / total_val
+=======
+        avg_val_loss = val_loss / len(val_dataloader.dataset)
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
         val_accuracy = total_val_correct / total_val
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
 
         print(f"Epoch {epoch} complete.")
 
+<<<<<<< HEAD
 
+=======
+model.half()
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 train_model(train_dataloader, model, criterion, optimizer)
 torch.save(model, 'tool_hybrid_complete.pth')
 
@@ -276,10 +307,17 @@ def evaluate_model(dataloader, model):
             with autocast():
                 outputs = model(videos)
                 probs = torch.sigmoid(outputs)
+<<<<<<< HEAD
                 
                 predicted = (probs > 0.5).float()
                 predictions.extend(predicted.cpu().numpy())  
                 true_labels.extend(labels.cpu().numpy()) 
+=======
+                # Convert probabilities to binary predictions
+                predicted = (probs > 0.5).float()
+                predictions.extend(predicted.cpu().numpy())  # Store predictions
+                true_labels.extend(labels.cpu().numpy()) # Store true labels
+>>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 
     # Flatten lists if necessary (for multi-label scenarios)
     predictions = [item for sublist in predictions for item in sublist]

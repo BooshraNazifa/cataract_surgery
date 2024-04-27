@@ -110,6 +110,7 @@ class VideoDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.frames_per_clip = frames_per_clip  
 
+
     def __len__(self):
         return len(self.df)
 
@@ -148,6 +149,7 @@ class VideoDataset(torch.utils.data.Dataset):
         return video_clip, labels
     
 def transform_frame(frame):
+
     if frame.dim() == 3 and frame.size(2) == 3:  
         frame = frame.permute(2, 0, 1)  
 
@@ -155,8 +157,7 @@ def transform_frame(frame):
         transforms.Resize((224, 224)),  
         transforms.ConvertImageDtype(torch.float),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],  
-                             std=[0.229, 0.224, 0.225])   
-    ])
+                             std=[0.229, 0.224, 0.225]) ])
     return transform_ops(frame)
 
 train_dataset = VideoDataset(train_df, videos_dir, transform=transform_frame)
@@ -222,10 +223,10 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
             except RuntimeError as e:
                 print(f"Skipping a video due to an error: {e}")
                 continue
-
         
         avg_train_loss = total_train_loss / len(dataloader.dataset)
         print(f"Epoch {epoch}, Training Loss: {avg_train_loss:.4f}")
+
 
 
         # Validation phase
@@ -239,6 +240,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                   with autocast():
                     outputs = model(videos)
                     val_loss = criterion(outputs, labels)
+
                     total_val_loss += val_loss.item() * videos.size(0)
 
                     predicted = torch.sigmoid(outputs) > 0.5
@@ -248,6 +250,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                    print(f"Skipping a video due to an error: {e}")
                    continue
         avg_val_loss = total_val_loss / total_val
+
         val_accuracy = total_val_correct / total_val
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
 

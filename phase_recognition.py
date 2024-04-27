@@ -14,8 +14,8 @@ from sklearn.metrics import precision_score, recall_score, f1_score, classificat
 
 
 # Directory containing your images in server
-train_image_dir = '/scratch/booshra/50/TrainFrames'
-val_image_dir = '/scratch/booshra/50/ValFrames'
+train_image_dir = '/scratch/booshra/half/TrainFrames'
+val_image_dir = '/scratch/booshra/half/ValFrames'
 test_image_dir = '/scratch/booshra/50/TestFrames'
 
 # List of phase names as your classes
@@ -34,6 +34,7 @@ class SurgicalPhaseDataset(Dataset):
         return len(self.img_labels)
     
     def __getitem__(self, idx):
+
       img_path = os.path.join(self.img_dir, self.img_labels[idx])
 
       # Check if the image file exists and is not empty
@@ -93,12 +94,11 @@ optimizer = optim.Adam(resnet.parameters(), lr=0.001)
 # Initialize the scheduler
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-model_path = './model_50_checkpoint.pth'
+model_path = '/home/booshra/final_project/cataract_surgery_old/model_checkpoint.pth'
 
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
-
     resnet.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -146,6 +146,7 @@ for epoch in range(10):
     correct = 0
     total = 0
     with torch.no_grad():
+
         for inputs, labels, filename, timestamp in val_dataloader:
             try:
                 if inputs is None or labels is None:
@@ -192,7 +193,7 @@ overall_val_accuracy_percentage = overall_val_accuracy * 100
 
 print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
 print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
-torch.save(resnet, 'resnet_50_complete.pth')
+torch.save(resnet, 'resnet_complete.pth')
 
 # Test Loop 
 resnet.eval()  
@@ -235,6 +236,8 @@ precision = precision_score(true_labels, all_preds, average='weighted')
 recall = recall_score(true_labels, all_preds, average='weighted')
 f1 = f1_score(true_labels, all_preds, average='weighted')
 test_accuracy = correct / total
+conf_matrix = confusion_matrix(true_labels, all_preds)
+
 
 
 

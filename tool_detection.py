@@ -20,9 +20,7 @@ from sklearn.metrics import multilabel_confusion_matrix
 from transformers import VivitModel
 
 
-videos_dir = "/scratch/booshra/tool"
-
-
+videos_dir = '/scratch/booshra/tool'
 def load_data_from_directory(directory):
     csv_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith('.csv')]
     list_of_dfs = [pd.read_csv(file) for file in csv_files]
@@ -233,6 +231,7 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         # Calculate average training loss for the epoch
         average_train_loss = total_train_loss / len(train_loader)
 
+
         # Validation phase
         model.eval()
         total_val_loss = 0
@@ -244,6 +243,7 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
                 total_val_loss += val_loss.item()
 
         # Calculate average validation loss for the epoch
+
         average_val_loss = total_val_loss / len(val_loader)
         print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
 
