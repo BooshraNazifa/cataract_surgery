@@ -129,11 +129,11 @@ def transform_frame(frame):
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-# train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-# train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
-train_ids = ["191R1"]
-val_ids = ["191S1"]
-test_ids = ["191R1"]
+train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
+train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
+# train_ids = ["191R1"]
+# val_ids = ["191S1"]
+# test_ids = ["191R1"]
 
 train_df = df[df['FileName'].isin(train_ids)]
 val_df = df[df['FileName'].isin(val_ids)]
@@ -233,56 +233,55 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         # Calculate average training loss for the epoch
         average_train_loss = total_train_loss / len(train_loader)
 
+        # Validation phase
+        model.eval()
+        total_val_loss = 0
+        with torch.no_grad():
+            for frames, labels in val_loader:
+                frames, labels = frames.to(device), labels.to(device)
+                outputs = model(frames)
+                val_loss = criterion(outputs, labels)
+                total_val_loss += val_loss.item()
 
-#         # Validation phase
-#         model.eval()
-#         total_val_loss = 0
-#         with torch.no_grad():
-#             for frames, labels in val_loader:
-#                 frames, labels = frames.to(device), labels.to(device)
-#                 outputs = model(frames)
-#                 val_loss = criterion(outputs, labels)
-#                 total_val_loss += val_loss.item()
+        # Calculate average validation loss for the epoch
 
-#         # Calculate average validation loss for the epoch
+        average_val_loss = total_val_loss / len(val_loader)
+        print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
 
-#         average_val_loss = total_val_loss / len(val_loader)
-#         print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
-
-# def evaluate_model(model, test_loader, criterion):
-#     model.eval()
-#     test_loss = 0
-#     all_preds = []
-#     all_labels = []
-#     with torch.no_grad():
-#         for frames, labels in test_loader:
-#             frames, labels = frames.to(device), labels.to(device)
-#             outputs = model(frames)
-#             preds = torch.sigmoid(outputs).round()
-#             all_preds.extend(preds.cpu().numpy())
-#             all_labels.extend(labels.cpu().numpy())
-#             test_loss += criterion(outputs, labels).item()
+def evaluate_model(model, test_loader, criterion):
+    model.eval()
+    test_loss = 0
+    all_preds = []
+    all_labels = []
+    with torch.no_grad():
+        for frames, labels in test_loader:
+            frames, labels = frames.to(device), labels.to(device)
+            outputs = model(frames)
+            preds = torch.sigmoid(outputs).round()
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            test_loss += criterion(outputs, labels).item()
     
-#     print("Sample predictions:", all_preds[:10])
-#     print("Sample labels:", all_labels[:10])
+    print("Sample predictions:", all_preds[:10])
+    print("Sample labels:", all_labels[:10])
 
-#     # Flatten lists if necessary (for multi-label scenarios)
-#     all_preds = [item for sublist in all_preds for item in sublist]
-#     all_labels = [item for sublist in all_labels for item in sublist]
+    # Flatten lists if necessary (for multi-label scenarios)
+    all_preds = [item for sublist in all_preds for item in sublist]
+    all_labels = [item for sublist in all_labels for item in sublist]
 
-#     # Calculate metrics
-#     accuracy = accuracy_score(all_labels, all_preds)
-#     precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
-#     recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
-#     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+    # Calculate metrics
+    accuracy = accuracy_score(all_labels, all_preds)
+    precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+    recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     
 
-#     print(f'Test Loss: {test_loss / len(test_loader)}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, '
-#           f'Recall: {recall:.4f}, F1 Score: {f1:.4f}')
-#     mcm = multilabel_confusion_matrix(all_labels, all_preds)
-#     print(mcm)
+    print(f'Test Loss: {test_loss / len(test_loader)}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, '
+          f'Recall: {recall:.4f}, F1 Score: {f1:.4f}')
+    mcm = multilabel_confusion_matrix(all_labels, all_preds)
+    print(mcm)
 
 
-train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=15, accumulation_steps=4)
-# torch.save(model, 'model_complete.pth')
-# evaluate_model(model, test_loader, criterion)
+train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=30, accumulation_steps=4)
+torch.save(model, 'model_complete.pth')
+evaluate_model(model, test_loader, criterion)
