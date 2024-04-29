@@ -195,64 +195,43 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
-def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
+def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulation_steps=4):
     model.train()
     scaler = GradScaler()
 
     for epoch in range(num_epochs):
         print(f"Starting Epoch {epoch}")
-        total_train_correct = 0
         total_train = 0
         total_train_loss = 0
-<<<<<<< HEAD
+        optimizer.zero_grad()  
 
-=======
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
-        for videos, labels in dataloader:
+        for i, (videos, labels) in enumerate(dataloader):
             videos, labels = videos.to(device), labels.to(device)
-            optimizer.zero_grad()
-
-<<<<<<< HEAD
             try:
-                # Enable automatic mixed precision
-                with autocast():
-                    outputs = model(videos)
-                    loss = criterion(outputs, labels)
+              with autocast():
+                outputs = model(videos)
+                loss = criterion(outputs, labels) / accumulation_steps  
 
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
+              scaler.scale(loss).backward()
+
+              if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)  
                 scaler.update()
-                optimizer.zero_grad()
+                optimizer.zero_grad()  
 
-                total_train_correct += (predicted == labels).float().sum().item()
-                total_train += labels.numel()
-                total_train_loss += loss.item() * videos.size(0)
-
+              total_train += labels.numel()
+              total_train_loss += loss.item() * videos.size(0) * accumulation_steps  
             except RuntimeError as e:
-                print(f"Skipping a video due to an error: {e}")
-                continue
+                   print(f"Skipping a video due to an error: {e}")
+                   continue
 
-        train_accuracy = total_train_correct / total_train
-        avg_train_loss = total_train_loss / len(dataloader.dataset)
-        print(f"Epoch {epoch}, Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.2f}")
-
-=======
-            # Enable automatic mixed precision
-            with autocast():
-                outputs = model(videos.to(device).half()) 
-                loss = criterion(outputs, labels)
-                total_train_loss += loss.item() * videos.size(0)
-            scaler.scale(loss).backward()
+        if len(dataloader) % accumulation_steps != 0:
             scaler.step(optimizer)
             scaler.update()
-            predicted = torch.sigmoid(outputs) > 0.5  # Convert logits to binary predictions
-            total_train_correct += (predicted == labels).float().sum().item()
-            total_train += labels.numel()
+            optimizer.zero_grad()
 
-        train_accuracy = total_train_correct / total_train
-        avg_train_loss = total_train_loss / len(train_dataloader.dataset)
-        print(f"Epoch {epoch}, Training Loss: {avg_train_loss}, Training Accuracy: {train_accuracy:.2f}")
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
+        avg_train_loss = total_train_loss / total_train
+        print(f"Epoch {epoch}, Training Loss: {avg_train_loss:.4f}")
 
         # Validation phase
         model.eval()  # Set the model to evaluation mode
@@ -265,35 +244,23 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3):
                   with autocast():
                     outputs = model(videos)
                     val_loss = criterion(outputs, labels)
-<<<<<<< HEAD
                     total_val_loss += val_loss.item() * videos.size(0)
-=======
-                    total_val_loss += loss.item() * videos.size(0)
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 
                     predicted = torch.sigmoid(outputs) > 0.5
                     total_val_correct += (predicted == labels).float().sum().item()
                     total_val += labels.numel()
-<<<<<<< HEAD
                 except RuntimeError as e:
                    print(f"Skipping a video due to an error: {e}")
                    continue
-        avg_val_loss = total_val_loss / total_val
-=======
-        avg_val_loss = val_loss / len(val_dataloader.dataset)
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
-        val_accuracy = total_val_correct / total_val
+        avg_val_loss = total_val_loss / total_val if total_val != 0 else 0
+        val_accuracy = total_val_correct / total_val if total_val != 0 else 0
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
 
         print(f"Epoch {epoch} complete.")
 
-<<<<<<< HEAD
 
-=======
-model.half()
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 train_model(train_dataloader, model, criterion, optimizer)
-torch.save(model, 'tool_hybrid_complete.pth')
+torch.save(model, 'tool_complete.pth')
 
 def evaluate_model(dataloader, model):
     model.eval()  
@@ -307,17 +274,10 @@ def evaluate_model(dataloader, model):
             with autocast():
                 outputs = model(videos)
                 probs = torch.sigmoid(outputs)
-<<<<<<< HEAD
                 
                 predicted = (probs > 0.5).float()
                 predictions.extend(predicted.cpu().numpy())  
                 true_labels.extend(labels.cpu().numpy()) 
-=======
-                # Convert probabilities to binary predictions
-                predicted = (probs > 0.5).float()
-                predictions.extend(predicted.cpu().numpy())  # Store predictions
-                true_labels.extend(labels.cpu().numpy()) # Store true labels
->>>>>>> 7d97931baf8678d483bca397a0f44bf3f247e308
 
     # Flatten lists if necessary (for multi-label scenarios)
     predictions = [item for sublist in predictions for item in sublist]

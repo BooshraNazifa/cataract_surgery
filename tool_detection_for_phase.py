@@ -18,7 +18,7 @@ from torchvision import transforms
 videos_dir = "/scratch/booshra/tool"
 
 # Load the Excel file for ground truth
-df = pd.read_excel('./tool_detection.xlsx')
+df = pd.read_excel('/scratch/booshra/final_project/cataract_surgery/tool_detection.xlsx')
 # Function to convert time strings to seconds
 def time_to_seconds(time_str):
     if pd.isna(time_str):
@@ -65,7 +65,7 @@ def extract_tools(tool_info):
     return []
 
 # Directory containing CSV files
-csv_directory = './Cataract_Tools'
+csv_directory = '/scratch/booshra/final_project/cataract_surgery/Cataract_Tools'
 dataframe = load_data_from_directory(csv_directory)
 
 # Preprocess the DataFrame as previously
@@ -131,7 +131,6 @@ class VideoDataset(torch.utils.data.Dataset):
         # Load the video segment
         video, _, info = read_video(video_path, start_pts=start_pts, end_pts=end_pts, pts_unit='sec')
 
-        fps = info['video_fps']
         total_frames = video.shape[0]
         frame_indices = torch.linspace(0, total_frames - 1, steps=self.frames_per_clip).long()
         video_clip = video[frame_indices]
@@ -190,7 +189,6 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
-from torch.cuda.amp import autocast, GradScaler
 
 def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulation_steps=4):
     model.train()

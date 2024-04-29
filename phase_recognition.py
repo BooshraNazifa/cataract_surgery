@@ -5,7 +5,7 @@ import numpy as np
 from torchvision.io import read_image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-
+import random
 from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
@@ -28,8 +28,20 @@ class SurgicalPhaseDataset(Dataset):
     def __init__(self, img_dir, transform=None):
         self.img_dir = img_dir
         self.transform = transform
-        self.img_labels = [f for f in os.listdir(img_dir) if os.path.isfile(os.path.join(img_dir, f))]
-    
+        self.img_labels = []
+        temp_list = []
+        total_files = 0
+        
+        # List all files and perform reservoir sampling
+        for f in os.listdir(img_dir):
+            if os.path.isfile(os.path.join(img_dir, f)):
+                total_files += 1
+                temp_list.append(f)
+
+        sample_size = total_files // 2
+        # Randomly choose half of the files without loading all file names
+        self.img_labels = random.sample(temp_list, sample_size)
+
     def __len__(self):
         return len(self.img_labels)
     
@@ -54,6 +66,32 @@ class SurgicalPhaseDataset(Dataset):
 
       return image, label, filename, timestamp  
     
+class SurgicalPhaseTestDataset(Dataset):
+    def __init__(self, img_dir, transform=None):
+        self.img_dir = img_dir
+        self.transform = transform
+        self.img_labels = [
+            f for f in os.listdir(img_dir) if os.path.isfile(os.path.join(img_dir, f)) and os.path.getsize(os.path.join(img_dir, f)) > 0
+        ]
+
+    def __len__(self):
+        return len(self.img_labels)
+    
+    def __getitem__(self, idx):
+      img_path = os.path.join(self.img_dir, self.img_labels[idx])
+
+      image = read_image(img_path)
+      filename_content = self.img_labels[idx].split('_')
+      label = filename_content[0]
+      label = phases.index(label)  # Ensure 'phases' is defined in your scope
+
+      if self.transform:
+        image = self.transform(image)
+
+      filename = filename_content[1]
+      timestamp = float(filename_content[-1].split('.')[0])
+
+      return image, label, filename, timestamp  
     
 
 # Define transformations
@@ -69,10 +107,18 @@ transform = transforms.Compose([
 # Create dataset
 print("Loading Train Dataset...")
 train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+train_dataset_size = len(train_dataset)
+print("Size of the dataset:", train_dataset_size)
 print("Loading Validation Dataset...")
 val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
+val_dataset_size = len(val_dataset)
+print("Size of the dataset:", val_dataset_size)
 print("Loading Test Dataset...")
-test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
+test_dataset = SurgicalPhaseTestDataset(test_image_dir, transform=transform)
+test_dataset_size = len(test_dataset)
+print("Size of the dataset:", test_dataset_size)
+
+
 
 # Create dataloaders
 print("Creating Dataloaders...")
@@ -118,8 +164,6 @@ for epoch in range(10):
 
     for inputs, labels, filename, timestamp in train_dataloader:
         try:
-            if inputs is None or labels is None:
-                continue
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = resnet(inputs)
             loss = criterion(outputs, labels)
@@ -148,8 +192,6 @@ for epoch in range(10):
 
         for inputs, labels, filename, timestamp in val_dataloader:
             try:
-                if inputs is None or labels is None:
-                   continue
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = resnet(inputs)
                 loss = criterion(outputs, labels)

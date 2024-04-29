@@ -2,14 +2,13 @@ import pandas as pd
 import ast
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torchvision.io import read_video
 from PIL import Image
 import os
 import torch.nn as nn
 import numpy as np
 import imageio
 from sklearn.model_selection import train_test_split
-from einops.layers.torch import Rearrange
-from einops import rearrange
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
 import imageio
 import torch
@@ -18,14 +17,16 @@ from PIL import Image
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.metrics import multilabel_confusion_matrix
 from transformers import VivitModel
+from torchvision import transforms
 
 
-videos_dir = '/scratch/booshra/tool'
 def load_data_from_directory(directory):
     csv_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith('.csv')]
     list_of_dfs = [pd.read_csv(file) for file in csv_files]
     for df in list_of_dfs:
-        df['FileName'] = df['FileName'].str.split('_').str[0]  # Assuming all CSVs need this operation
+        frame_index_with_extention = df['FileName'].str.split('_').str[2]
+        df['frame_index'] = frame_index_with_extention.str.split('.').str[0]
+        df['FileName'] = df['FileName'].str.split('_').str[0]  
     combined_df = pd.concat(list_of_dfs, ignore_index=True)
     return combined_df
 
@@ -46,79 +47,98 @@ def tools_to_vector(tools):
 # Directory containing CSV files
 csv_directory = './Cataract_Tools'
 df = load_data_from_directory(csv_directory)
-print(df.head())
+
 
 # Preprocess the DataFrame as previously
 df['Tool Names'] = df['Tool bounding box'].apply(extract_tools)
 all_tools = sorted(set(tool for sublist in df['Tool Names'] for tool in sublist))
 df['Tools'] = df['Tool Names'].apply(tools_to_vector)
+
+print(df.columns)
+del df['Unnamed: 0']
+del df['Predicted Labels']
+del df['Phase']
+del df['Label Title']
+del df['Tool Bounding Box']
+del df['Tool bounding box']
 print(df.head())
+videos_dir = './Videos'
+
 
 class VideoDataset(torch.utils.data.Dataset):
-    def __init__(self, video_files, annotations, transform=None, fixed_frame_count=32):
-        self.video_files = video_files
-        self.annotations = annotations
+    def __init__(self, dataframe, transform=None):
+        self.dataframe = dataframe
         self.transform = transform
-        self.fixed_frame_count = fixed_frame_count  # Set a fixed number of frames for each video
+        self.frames_per_clip = 32
 
     def __len__(self):
-        return len(self.video_files)
+        return len(self.dataframe)
+    
+    def find_video_path(self, base_path):
+        """Check for different video file extensions."""
+        for ext in ['.mp4', '.mov']:
+            if os.path.exists(base_path + ext):
+                return base_path + ext
+        raise FileNotFoundError(f"No video file found for {base_path} with extensions .mp4 or .mov")
 
     def __getitem__(self, idx):
-        video_path = self.video_files[idx]
-        frames = self.load_video_frames(video_path)
-        frames = self.adjust_frame_count(frames)
-
-        # Convert frames to tensors
-        frames_tensor = torch.stack([self.transform(frame) for frame in frames])
-        tools_vector = self.get_tools_vector(idx)
-        print(tools_vector)
-        return frames_tensor, tools_vector
-
-    def load_video_frames(self, video_path):
-        """ Load video frames using imageio. """
-        frames = []
-        try:
-            with imageio.get_reader(video_path) as reader:
-                for frame in reader:
-                    image = Image.fromarray(frame)
-                    frames.append(image)
-        except Exception as e:
-            print(f"Failed to load video {video_path}: {e}")
-        return frames
-    
-    def adjust_frame_count(self, frames):
-        """ Adjust the number of frames to the fixed_frame_count by padding or truncating. """
-        if len(frames) > self.fixed_frame_count:
-            return frames[:self.fixed_frame_count]  # Truncate to fixed frame count
-        elif len(frames) < self.fixed_frame_count:
-            # Pad with the last frame if not enough frames
-            last_frame = frames[-1] if frames else Image.new('RGB', (256, 256), color = 'black')
-            frames.extend([last_frame] * (self.fixed_frame_count - len(frames)))
-        return frames
-
-    def get_tools_vector(self, idx):
-        """ Retrieve or generate tools vector for annotations. """
-        if idx in self.annotations:
-            return torch.tensor(self.annotations[idx], dtype=torch.float32)
-        else:
-            return torch.zeros(10, dtype=torch.float32)
+        row = self.dataframe.iloc[idx]
+        video_filename = row['FileName']
+        base_video_path = os.path.join(videos_dir, video_filename)
+        video_path = self.find_video_path(base_video_path)
+        print(video_path)
         
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        time_recorded = row['Time Recorded']
+        start_pts = max(time_recorded - 5, 0)
+        end_pts = time_recorded + 5
+
+        # Load the video segment
+        video, _, info = read_video(video_path, start_pts=start_pts, end_pts=end_pts, pts_unit='sec')
+
+        total_frames = video.shape[0]
+        frame_indices = torch.linspace(0, total_frames - 1, steps=self.frames_per_clip).long()
+        video_clip = video[frame_indices]
+
+        if self.transform:
+            video_clip = torch.stack([self.transform(frame) for frame in video_clip])
+        video_clip = video_clip.permute(0, 1, 2, 3)
+
+        tools_vector = torch.tensor(row['Tools'], dtype=torch.float32)
+        print(tools_vector)
+        return video_clip, tools_vector
+    
 transform = Compose([
     Resize((224, 224)),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Standard ImageNet normalization
 ])
+def transform_frame(frame):
+
+    if frame.dim() == 3 and frame.size(2) == 3:  
+        frame = frame.permute(2, 0, 1)  
+
+    transform_ops = transforms.Compose([
+        transforms.Resize((224, 224)),  
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],  
+                             std=[0.229, 0.224, 0.225]) ])
+    return transform_ops(frame)
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
-
+# train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
+# train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
+train_ids = ["191R1"]
+val_ids = ["191S1"]
+test_ids = ["191R1"]
 
 train_df = df[df['FileName'].isin(train_ids)]
 val_df = df[df['FileName'].isin(val_ids)]
 test_df = df[df['FileName'].isin(test_ids)]
+
 
 def verify_videos(video_files):
     verified_videos = []
@@ -148,34 +168,14 @@ def is_empty(tools):
     elif pd.isna(tools):
         return True
     else:
-        return not bool(tools)  # Fallback for other types, using bool conversion
+        return not bool(tools)  
 
-def extract_info(df):
-    video_files = []
-    annotations = {}
-    for name in df['FileName'].unique():
-        file_path = find_file_with_extension(videos_dir, name, ['.mp4', '.mov'])
-        if file_path:
-            tools_data = df[df['FileName'] == os.path.splitext(os.path.basename(file_path))[0]].iloc[0]
-            if is_empty(tools_data['Tools']):
-                print(f"Skipping {name} due to missing annotations.")
-            else:
-                video_files.append(file_path)
-                annotations[file_path] = tools_data['Tools']
-        else:
-            print(f"No valid file found for {name} with any of the checked extensions")
 
-    video_files = verify_videos(video_files)
-    return video_files, annotations
-
-train_files, train_annotations = extract_info(train_df)
-val_files, val_annotations = extract_info(val_df)
-test_files, test_annotations = extract_info(test_df)
 
 # Create datasets
-train_dataset = VideoDataset(train_files, train_annotations, transform=transform)
-val_dataset = VideoDataset(val_files, val_annotations, transform=transform)
-test_dataset = VideoDataset(test_files, test_annotations, transform=transform)
+train_dataset = VideoDataset(train_df, transform=transform_frame)
+val_dataset = VideoDataset(val_df, transform=transform_frame)
+test_dataset = VideoDataset(test_df, transform=transform_frame)
 
 train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=True)
@@ -211,7 +211,9 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
 
         model.train()
         total_train_loss = 0
+        print("loading train loader")
         for step, (frames, labels) in enumerate(train_loader):
+            frames = frames.unsqueeze(0).repeat(2, 1, 1, 1)
             frames, labels = frames.to(device), labels.to(device)
             outputs = model(frames)
             loss = criterion(outputs, labels) / accumulation_steps  # Scale loss to account for accumulation
@@ -232,55 +234,55 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         average_train_loss = total_train_loss / len(train_loader)
 
 
-        # Validation phase
-        model.eval()
-        total_val_loss = 0
-        with torch.no_grad():
-            for frames, labels in val_loader:
-                frames, labels = frames.to(device), labels.to(device)
-                outputs = model(frames)
-                val_loss = criterion(outputs, labels)
-                total_val_loss += val_loss.item()
+#         # Validation phase
+#         model.eval()
+#         total_val_loss = 0
+#         with torch.no_grad():
+#             for frames, labels in val_loader:
+#                 frames, labels = frames.to(device), labels.to(device)
+#                 outputs = model(frames)
+#                 val_loss = criterion(outputs, labels)
+#                 total_val_loss += val_loss.item()
 
-        # Calculate average validation loss for the epoch
+#         # Calculate average validation loss for the epoch
 
-        average_val_loss = total_val_loss / len(val_loader)
-        print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
+#         average_val_loss = total_val_loss / len(val_loader)
+#         print(f'Epoch {epoch}: Average Train Loss {average_train_loss}, Average Val Loss {average_val_loss}')
 
-def evaluate_model(model, test_loader, criterion):
-    model.eval()
-    test_loss = 0
-    all_preds = []
-    all_labels = []
-    with torch.no_grad():
-        for frames, labels in test_loader:
-            frames, labels = frames.to(device), labels.to(device)
-            outputs = model(frames)
-            preds = torch.sigmoid(outputs).round()
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-            test_loss += criterion(outputs, labels).item()
+# def evaluate_model(model, test_loader, criterion):
+#     model.eval()
+#     test_loss = 0
+#     all_preds = []
+#     all_labels = []
+#     with torch.no_grad():
+#         for frames, labels in test_loader:
+#             frames, labels = frames.to(device), labels.to(device)
+#             outputs = model(frames)
+#             preds = torch.sigmoid(outputs).round()
+#             all_preds.extend(preds.cpu().numpy())
+#             all_labels.extend(labels.cpu().numpy())
+#             test_loss += criterion(outputs, labels).item()
     
-    print("Sample predictions:", all_preds[:10])
-    print("Sample labels:", all_labels[:10])
+#     print("Sample predictions:", all_preds[:10])
+#     print("Sample labels:", all_labels[:10])
 
-    # Flatten lists if necessary (for multi-label scenarios)
-    all_preds = [item for sublist in all_preds for item in sublist]
-    all_labels = [item for sublist in all_labels for item in sublist]
+#     # Flatten lists if necessary (for multi-label scenarios)
+#     all_preds = [item for sublist in all_preds for item in sublist]
+#     all_labels = [item for sublist in all_labels for item in sublist]
 
-    # Calculate metrics
-    accuracy = accuracy_score(all_labels, all_preds)
-    precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
-    recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
-    f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+#     # Calculate metrics
+#     accuracy = accuracy_score(all_labels, all_preds)
+#     precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+#     recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+#     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     
 
-    print(f'Test Loss: {test_loss / len(test_loader)}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, '
-          f'Recall: {recall:.4f}, F1 Score: {f1:.4f}')
-    mcm = multilabel_confusion_matrix(all_labels, all_preds)
-    print(mcm)
+#     print(f'Test Loss: {test_loss / len(test_loader)}, Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, '
+#           f'Recall: {recall:.4f}, F1 Score: {f1:.4f}')
+#     mcm = multilabel_confusion_matrix(all_labels, all_preds)
+#     print(mcm)
 
 
 train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=15, accumulation_steps=4)
-torch.save(model, 'model_complete.pth')
-evaluate_model(model, test_loader, criterion)
+# torch.save(model, 'model_complete.pth')
+# evaluate_model(model, test_loader, criterion)
