@@ -1,6 +1,8 @@
 import pandas as pd
 import ast
+import av
 import os
+import torch
 import numpy as np
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
@@ -9,14 +11,14 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.io import read_video
 from torch.optim import AdamW
 from torch.nn import BCEWithLogitsLoss
-import torch
+from PIL import Image
 from torch.cuda.amp import autocast, GradScaler
-from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from torchvision import transforms
 
-videos_dir = "/scratch/booshra/tool"
 
+# csv_directory = './Cataract_Tools'
+# videos_dir = './Videos'
 # Load the Excel file for ground truth
 df = pd.read_excel('/scratch/booshra/final_project/cataract_surgery/tool_detection.xlsx')
 # Function to convert time strings to seconds
@@ -66,6 +68,7 @@ def extract_tools(tool_info):
 
 # Directory containing CSV files
 csv_directory = '/scratch/booshra/final_project/cataract_surgery/Cataract_Tools'
+videos_dir = "/scratch/booshra/tool"
 dataframe = load_data_from_directory(csv_directory)
 
 # Preprocess the DataFrame as previously
@@ -96,15 +99,14 @@ print(video_ids)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 
-
-train_df = dataframe[dataframe['FileName'].isin(train_ids)]
+train_df = dataframe[dataframe['FileName'].isin(video_ids)]
 val_df = dataframe[dataframe['FileName'].isin(val_ids)]
 test_df = dataframe[dataframe['FileName'].isin(test_ids)]
 
 print(train_df)
 
 class VideoDataset(torch.utils.data.Dataset):
-    def __init__(self, dataframe, root_dir, transform=None, frames_per_clip=32):
+    def __init__(self, dataframe, root_dir, transform=None, frames_per_clip=16):
         self.df = dataframe
         self.root_dir = root_dir
         self.transform = transform
@@ -123,20 +125,47 @@ class VideoDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         base_video_path = os.path.join(self.root_dir, self.df.iloc[idx]['FileName'])
         video_path = self.find_video_path(base_video_path)
+        container = av.open(video_path)
         time_recorded = self.df.iloc[idx]['Time Recorded']
 
         start_pts = max(time_recorded - 5, 0)
         end_pts = time_recorded + 5
 
-        # Load the video segment
-        video, _, info = read_video(video_path, start_pts=start_pts, end_pts=end_pts, pts_unit='sec')
+        stream = container.streams.video[0]
 
-        total_frames = video.shape[0]
-        frame_indices = torch.linspace(0, total_frames - 1, steps=self.frames_per_clip).long()
-        video_clip = video[frame_indices]
+        seek_point = int(start_pts / stream.time_base)
+        container.seek(seek_point, any_frame=False, backward=True, stream=stream)
+        frame_list = []
+        frames_decoded = 0
+        for frame in container.decode(video=0):
+            frame_time = frame.pts * stream.time_base  
+            if frame_time < start_pts:
+               continue
+            if frame_time > end_pts:
+               break
+            if frames_decoded < self.frames_per_clip:
+               frame_list.append(frame.to_image())
+               frames_decoded += 1
+            else:
+               break
+
+        interpolated = []
+        step = len(frame_list) / 32
+        frame_array_list = [np.array(frame) for frame in frame_list]
+        for i in range(32 - 1):
+          index = int(step * i)
+          next_index = min(int(step * (i + 1)), len(frame_list) - 1)
+          alpha = (step * i) - index
+          interpolated_frame = (1 - alpha) * frame_array_list[index].astype(float) + alpha * frame_array_list[next_index].astype(float)
+          interpolated_frame = np.clip(interpolated_frame, 0, 255).astype(np.uint8)
+
+          interpolated_frame = Image.fromarray(interpolated_frame)
+          interpolated.append(interpolated_frame)
+        interpolated.append(frame_list[-1])
+
 
         if self.transform:
-            video_clip = torch.stack([self.transform(frame) for frame in video_clip])
+            video_clip = torch.stack([self.transform(frame) for frame in interpolated])
         video_clip = video_clip.permute(0, 1, 2, 3)
 
         # Prepare labels
@@ -144,25 +173,20 @@ class VideoDataset(torch.utils.data.Dataset):
         print(labels)
         return video_clip, labels
     
-def transform_frame(frame):
+transform = transforms.Compose([
+    transforms.Resize((128, 128)),  
+    transforms.Resize((224, 224)),  
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
 
-    if frame.dim() == 3 and frame.size(2) == 3:  
-        frame = frame.permute(2, 0, 1)  
-
-    transform_ops = transforms.Compose([
-        transforms.Resize((224, 224)),  
-        transforms.ConvertImageDtype(torch.float),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],  
-                             std=[0.229, 0.224, 0.225]) ])
-    return transform_ops(frame)
-
-train_dataset = VideoDataset(train_df, videos_dir, transform=transform_frame)
+train_dataset = VideoDataset(train_df, videos_dir, transform=transform)
 train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
-val_dataset = VideoDataset(val_df, videos_dir, transform=transform_frame)
+val_dataset = VideoDataset(val_df, videos_dir, transform=transform)
 val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True)
 
-test_dataset = VideoDataset(test_df, videos_dir, transform=transform_frame)
+test_dataset = VideoDataset(test_df, videos_dir, transform=transform)
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
 class CustomVivit(nn.Module):
