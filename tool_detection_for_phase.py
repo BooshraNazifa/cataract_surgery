@@ -14,8 +14,9 @@ from PIL import Image
 from torch.cuda.amp import autocast, GradScaler
 import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from torchvision import transforms
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
+                             confusion_matrix, roc_curve, auc)
 
 
 # csv_directory = './Cataract_Tools'
@@ -315,6 +316,7 @@ def evaluate_model(dataloader, model):
     model.eval()  
     predictions = []
     true_labels = []
+    probabilities = []
 
     with torch.no_grad():  
         for videos, labels in dataloader:
@@ -325,12 +327,14 @@ def evaluate_model(dataloader, model):
                 probs = torch.sigmoid(outputs)
                 
                 predicted = (probs > 0.5).float()
-                predictions.extend(predicted.cpu().numpy())  
+                predictions.extend(predicted.cpu().numpy()) 
+                probabilities.extend(probs.cpu().numpy()) 
                 true_labels.extend(labels.cpu().numpy()) 
 
     # Flatten lists if necessary (for multi-label scenarios)
     predictions = [item for sublist in predictions for item in sublist]
     true_labels = [item for sublist in true_labels for item in sublist]
+    probabilities = [item for sublist in probabilities for item in sublist] if any(isinstance(i, list) for i in probabilities) else probabilities
 
     # Calculate metrics
     accuracy = accuracy_score(true_labels, predictions)
@@ -352,5 +356,20 @@ def evaluate_model(dataloader, model):
     plt.ylabel('True labels')
     plt.title('Confusion Matrix Heatmap')
     plt.savefig('./images/vivit_groundtruth_confusion_matrix.png')
+
+    fpr, tpr, thresholds = roc_curve(true_labels, probabilities)
+    roc_auc = auc(fpr, tpr)
+
+    # Plot ROC curve
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic')
+    plt.legend(loc="lower right")
+    plt.savefig('./images/vivit_groundtruth_roc.png')
 
 evaluate_model(test_dataloader, model)
