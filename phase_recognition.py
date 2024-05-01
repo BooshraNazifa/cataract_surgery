@@ -10,6 +10,7 @@ from torchvision.models import resnet50, ResNet50_Weights
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.metrics import precision_score, recall_score, f1_score, classification_report, confusion_matrix
 
 
@@ -128,7 +129,10 @@ test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_worke
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-resnet.fc = nn.Linear(resnet.fc.in_features, 14)
+resnet.fc = nn.Sequential(
+    nn.Dropout(0.5),  
+    nn.Linear(resnet.fc.in_features, 14)
+)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 resnet = resnet.to(device)
 
@@ -144,11 +148,21 @@ model_path = '/home/booshra/final_project/cataract_surgery_old/model_checkpoint.
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
-    resnet.load_state_dict(checkpoint['model_state_dict'])
+
+    model_dict = resnet.state_dict()
+    pretrained_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if k in model_dict and model_dict[k].shape == v.shape}
+    model_dict.update(pretrained_dict)
+    resnet.load_state_dict(model_dict)
+
+    optimizer = torch.optim.Adam(resnet.parameters(), lr=1e-4)  
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
+    if 'scheduler_state_dict' in checkpoint:
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)  
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
     best_val_loss = checkpoint['best_val_loss']
-    print("Model loaded successfully.")
+    print("Model loaded successfully with new dropout layer.")
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
@@ -324,3 +338,11 @@ plt.title('Test Performance')
 plt.ylabel('Value')  # Modify as needed; might be percentage or raw number
 plt.tight_layout()
 plt.savefig('./images/training_validation_test_performance.png')
+
+# Creating a heatmap for the confusion matrix
+plt.figure(figsize=(10, 7))
+sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', cbar=False)  # 'g' for integer format
+plt.xlabel('Predicted labels')
+plt.ylabel('True labels')
+plt.title('Confusion Matrix Heatmap')
+plt.savefig('./images/resnet_cm.png')

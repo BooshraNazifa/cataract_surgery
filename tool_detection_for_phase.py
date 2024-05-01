@@ -19,7 +19,7 @@ from torchvision import transforms
 
 # csv_directory = './Cataract_Tools'
 # videos_dir = './Videos'
-# Load the Excel file for ground truth
+# Load the Excel file for ground truth 
 df = pd.read_excel('/scratch/booshra/final_project/cataract_surgery/tool_detection.xlsx')
 # Function to convert time strings to seconds
 def time_to_seconds(time_str):
@@ -99,9 +99,10 @@ print(video_ids)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 
-train_df = dataframe[dataframe['FileName'].isin(video_ids)]
+train_df = dataframe[dataframe['FileName'].isin(train_ids)]
 val_df = dataframe[dataframe['FileName'].isin(val_ids)]
 test_df = dataframe[dataframe['FileName'].isin(test_ids)]
+
 
 print(train_df)
 
@@ -181,12 +182,24 @@ transform = transforms.Compose([
 ])
 
 train_dataset = VideoDataset(train_df, videos_dir, transform=transform)
+train_dataset_size = len(train_dataset)
+print("Size of the dataset:", train_dataset_size)
+
 train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+train_dataloader_num_batches = len(train_dataloader)
+print(f"Number of batches per epoch: {train_dataloader_num_batches}")
 
 val_dataset = VideoDataset(val_df, videos_dir, transform=transform)
+val_dataset_size = len(val_dataset)
+print("Size of the dataset:", val_dataset_size)
+
 val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True)
+val_dataloader_num_batches = len(val_dataloader)
+print(f"Number of batches per epoch: {val_dataloader_num_batches}")
 
 test_dataset = VideoDataset(test_df, videos_dir, transform=transform)
+test_dataset_size = len(test_dataset)
+print("Size of the dataset:", test_dataset_size)
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
 class CustomVivit(nn.Module):
