@@ -129,10 +129,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_worke
 
 # Load Pretrained ResNet and Modify Final Layer
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
-resnet.fc = nn.Sequential(
-    nn.Dropout(0.5),  
-    nn.Linear(resnet.fc.in_features, 14)
-)
+resnet.fc = nn.Linear(resnet.fc.in_features, 14)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 resnet = resnet.to(device)
 
@@ -148,28 +145,18 @@ model_path = '/home/booshra/final_project/cataract_surgery_old/model_checkpoint.
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
-
-    model_dict = resnet.state_dict()
-    pretrained_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if k in model_dict and model_dict[k].shape == v.shape}
-    model_dict.update(pretrained_dict)
-    resnet.load_state_dict(model_dict)
-
-    optimizer = torch.optim.Adam(resnet.parameters(), lr=1e-4)  
+    resnet.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    
-    if 'scheduler_state_dict' in checkpoint:
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)  
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     best_val_loss = checkpoint['best_val_loss']
-    print("Model loaded successfully with new dropout layer.")
+    print("Model loaded successfully.")
 
 train_losses, val_losses = [], []
 train_accs, val_accs = [], []
 best_val_loss = float('inf')
 
 # Training Loop
-for epoch in range(10):
+for epoch in range(5):
     print(epoch)
     resnet.train()
     running_loss = 0.0
@@ -345,4 +332,4 @@ sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', cbar=False)  # 'g' f
 plt.xlabel('Predicted labels')
 plt.ylabel('True labels')
 plt.title('Confusion Matrix Heatmap')
-plt.savefig('./images/resnet_cm.png')
+plt.savefig('./images/resnet_confusion_matrix.png')

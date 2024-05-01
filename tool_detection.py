@@ -6,7 +6,7 @@ import pandas as pd
 import imageio
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from torchvision.transforms import Resize, Normalize, ToTensor, Compose
 from PIL import Image
@@ -146,7 +146,7 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=8, replace=False)
+video_ids = np.random.choice(video_ids, size=5, replace=False)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
 # train_ids = ["191R1"]
@@ -200,38 +200,19 @@ val_loader = DataLoader(val_dataset, batch_size=1, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
 
-# class CustomVivit(nn.Module):
-#     def __init__(self, num_labels):
-#         super(CustomVivit, self).__init__()
-#         self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
-#         self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
-#         self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  
-#         self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
-
-#     def forward(self, inputs):
-#         outputs = self.vivit(inputs)  
-#         x = self.dropout(outputs.pooler_output)  
-#         x = self.classifier(x)  
-#         x = self.sigmoid(x)  
-#         return x
-    
 class CustomVivit(nn.Module):
     def __init__(self, num_labels):
         super(CustomVivit, self).__init__()
         self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
-        self.adaptive_pool = nn.AdaptiveAvgPool3d((1, 1, 1))  
-        self.dropout = nn.Dropout(0.5)
-        hidden_size = self.vivit.config.hidden_size
-        self.classifier = nn.Linear(hidden_size, num_labels)
-        self.sigmoid = nn.Sigmoid()
+        self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
+        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  
+        self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
 
     def forward(self, inputs):
-        outputs = self.vivit(inputs)  # Assuming [1] is the last hidden state
-        x = self.adaptive_pool(outputs)  # Apply adaptive pooling to convert any size to (1, 1, 1)
-        x = x.view(x.size(0), -1)  # Flatten the output
-        x = self.dropout(x)
-        x = self.classifier(x)
-        x = self.sigmoid(x)
+        outputs = self.vivit(inputs)  
+        x = self.dropout(outputs.pooler_output)  
+        x = self.classifier(x)  
+        x = self.sigmoid(x)  
         return x
 
 

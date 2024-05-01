@@ -7,12 +7,13 @@ import numpy as np
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from transformers import VivitModel
-from torch.utils.data import Dataset, DataLoader
-from torchvision.io import read_video
+from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.nn import BCEWithLogitsLoss
 from PIL import Image
 from torch.cuda.amp import autocast, GradScaler
+import seaborn as sns
+import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from torchvision import transforms
 
@@ -94,7 +95,7 @@ print(dataframe)
 
 # Splitting the data into training, validation, and testing
 video_ids = dataframe['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=8, replace=False)
+video_ids = np.random.choice(video_ids, size=5, replace=False)
 print(video_ids)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
@@ -206,19 +207,19 @@ class CustomVivit(nn.Module):
     def __init__(self, num_labels):
         super(CustomVivit, self).__init__()
         self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
-        self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
-        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  # Adjust according to the number of tools
-        self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
+        self.dropout = nn.Dropout(0.5)  
+        self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  
+        self.sigmoid = nn.Sigmoid()  
 
     def forward(self, inputs):
-        outputs = self.vivit(inputs)  # Get the base model outputs
-        x = self.dropout(outputs.pooler_output)  # Use pooled output for classification
-        x = self.classifier(x)  # Get raw scores for each class
-        x = self.sigmoid(x)  # Convert to probabilities per class
+        outputs = self.vivit(inputs) 
+        x = self.dropout(outputs.pooler_output)  
+        x = self.classifier(x)  
+        x = self.sigmoid(x)  
         return x
     
 # Initialize model with the number of labels/tools
-num_labels = len(all_tools)  # Ensure you have defined all_tools array correctly
+num_labels = len(all_tools)  
 model = CustomVivit(num_labels)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
@@ -343,5 +344,13 @@ def evaluate_model(dataloader, model):
     print(f"Recall: {recall:.4f}")
     print(f"F1 Score: {f1:.4f}")
     print(f'Confusion Matrix:\n{conf_matrix}')
+
+    # Creating a heatmap for the confusion matrix
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', cbar=False)  # 'g' for integer format
+    plt.xlabel('Predicted labels')
+    plt.ylabel('True labels')
+    plt.title('Confusion Matrix Heatmap')
+    plt.savefig('./images/vivit_groundtruth_confusion_matrix.png')
 
 evaluate_model(test_dataloader, model)
