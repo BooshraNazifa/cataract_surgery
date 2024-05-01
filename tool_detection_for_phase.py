@@ -213,6 +213,14 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
+model_path = '/scratch/booshra/final_project/vivit_tool_phase_lastepoch.pth'
+
+if os.path.exists(model_path):
+    checkpoint = torch.load(model_path, map_location='cuda')
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    print("Model loaded successfully.")
+
 
 def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulation_steps=4):
     model.train()
@@ -223,6 +231,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulat
         total_train = 0
         total_train_loss = 0
         optimizer.zero_grad()  
+        accum_counter = 0
 
         for i, (videos, labels) in enumerate(dataloader):
             videos, labels = videos.to(device), labels.to(device)
@@ -232,11 +241,13 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulat
                 loss = criterion(outputs, labels) / accumulation_steps  
 
               scaler.scale(loss).backward()
+              accum_counter += 1
 
-              if (i + 1) % accumulation_steps == 0:
-                scaler.step(optimizer)  
-                scaler.update()
-                optimizer.zero_grad()  
+              if accum_counter == accumulation_steps:
+                    scaler.step(optimizer)  
+                    scaler.update()
+                    optimizer.zero_grad()  
+                    accum_counter = 0  
 
               total_train += labels.numel()
               total_train_loss += loss.item() * videos.size(0) * accumulation_steps  
@@ -244,7 +255,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulat
                    print(f"Skipping a video due to an error: {e}")
                    continue
 
-        if len(dataloader) % accumulation_steps != 0:
+        if accum_counter != 0:  # Check if there are unapplied gradients
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -274,6 +285,11 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulat
         avg_val_loss = total_val_loss / total_val if total_val != 0 else 0
         val_accuracy = total_val_correct / total_val if total_val != 0 else 0
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
+
+        checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict()}
+        torch.save(checkpoint, model_path)
 
         print(f"Epoch {epoch} complete.")
 

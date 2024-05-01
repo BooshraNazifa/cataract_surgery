@@ -242,6 +242,14 @@ model = CustomVivit(num_labels).to(device)
 criterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
+model_path = '/scratch/booshra/final_project/vivit_tool_lastepoch.pth'
+
+if os.path.exists(model_path):
+    checkpoint = torch.load(model_path, map_location='cuda')
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    print("Model loaded successfully.")
+
 def train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs, accumulation_steps=4):
     for epoch in range(num_epochs):
         print(f"Epoch {epoch + 1}/{num_epochs}")
@@ -252,7 +260,7 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         total_steps = len(train_loader)
         print("loading train loader")
         for step, (frames, labels) in enumerate(train_loader):
-            
+            optimizer.zero_grad()
             frames, labels = frames.to(device), labels.to(device)
             with autocast():
                 outputs = model(frames)
@@ -265,6 +273,8 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
                optimizer.zero_grad()
              
             total_train_loss += loss.item()  
+            if step % 100 == 0:
+                print(f"Step {step}/{total_steps}, Current Loss: {loss.item():.4f}")
         average_train_loss = total_train_loss / total_steps
         print(f"Average Training Loss: {average_train_loss:.4f}")
 
@@ -282,10 +292,15 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
 
         average_val_loss = total_val_loss / len(val_loader)
         print(f"Average Validation Loss: {average_val_loss:.4f}")
-
-    if torch.cuda.is_available():
+    
+        checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict()}
+        torch.save(checkpoint, model_path)
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    print(f"Epoch {epoch + 1} complete. Training Loss: {average_train_loss:.4f}, Validation Loss: {average_val_loss:.4f}")
+    
+        print(f"Epoch {epoch + 1} complete. Training Loss: {average_train_loss:.4f}, Validation Loss: {average_val_loss:.4f}")
 
 def evaluate_model(model, test_loader, criterion):
     model.eval()
