@@ -20,6 +20,7 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_s
                              confusion_matrix, roc_curve, auc)
 
 videos_dir = "/scratch/booshra/tool"
+csv_directory = '/scratch/booshra/final_project/cataract_surgery/Cataract_Tools'
 
 ## Load the Excel file for Phase detection results
 
@@ -73,8 +74,6 @@ def extract_tools(tool_info):
     return []
 
 
-# Directory containing CSV files
-csv_directory = './Cataract_Tools'
 dataframe = load_data_from_directory(csv_directory)
 
 # Preprocess the DataFrame as previously
@@ -88,11 +87,14 @@ def filter_frames(df, phase_times):
     results = []
     for index, row in df.iterrows():
         video_id = row['FileName']
-        time_recorded = row['Time Recorded'] 
-        start_time, end_time = phase_times.get(video_id, (0, 0))
-        if start_time <= time_recorded <= end_time:
-            results.append(row)
+        time_recorded = row['Time Recorded']     
+        start_time, end_time = phase_times.get(video_id, (None, None))
+  
+        if start_time is not None and end_time is not None:
+            if start_time <= time_recorded <= end_time:
+                results.append(row)
     return pd.DataFrame(results)
+
 
 dataframe = filter_frames(dataframe, phase_times)
 print(dataframe)
@@ -100,7 +102,7 @@ print(dataframe)
 
 # Splitting the data into training, validation, and testing
 video_ids = dataframe['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=5, replace=False)
+video_ids = np.random.choice(video_ids, size=8, replace=False)
 print(video_ids)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
@@ -177,7 +179,6 @@ class VideoDataset(torch.utils.data.Dataset):
 
         # Prepare labels
         labels = torch.tensor(self.df.iloc[idx]['Tools'], dtype=torch.float32)
-        print(labels)
         return video_clip, labels
     
 transform = transforms.Compose([
@@ -211,7 +212,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 class CustomVivit(nn.Module):
     def __init__(self, num_labels):
         super(CustomVivit, self).__init__()
-        self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
+        self.vivit = VivitModel.from_pretrained('/scratch/booshra/final_project/vivit_model')
         self.dropout = nn.Dropout(0.5)  
         self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  
         self.sigmoid = nn.Sigmoid()  
@@ -241,7 +242,7 @@ if os.path.exists(model_path):
     print("Model loaded successfully.")
 
 
-def train_model(dataloader, model, criterion, optimizer, num_epochs=3, accumulation_steps=4):
+def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulation_steps=4):
     model.train()
     scaler = GradScaler()
 

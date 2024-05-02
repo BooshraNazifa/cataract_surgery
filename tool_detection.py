@@ -133,7 +133,6 @@ class VideoDataset(torch.utils.data.Dataset):
         video_clip = video_clip.permute(0, 1, 2, 3)
 
         tools_vector = torch.tensor(row['Tools'], dtype=torch.float32)
-        print(tools_vector)
         return video_clip, tools_vector
     
 
@@ -146,12 +145,9 @@ transform = Compose([
 
 # Splitting the data into training, validation, and testing
 video_ids = df['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=5, replace=False)
+video_ids = np.random.choice(video_ids, size=8, replace=False)
 train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
 train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
-# train_ids = ["191R1"]
-# val_ids = ["191S1"]
-# test_ids = ["191R1"]
 
 train_df = df[df['FileName'].isin(video_ids)]
 val_df = df[df['FileName'].isin(val_ids)]
@@ -162,10 +158,9 @@ def verify_videos(video_files):
     verified_videos = []
     for video_file in video_files:
         try:
-            # Attempt to get a reader and read the first frame
             with imageio.get_reader(video_file) as reader:
                 _ = reader.get_next_data()  
-                verified_videos.append(video_file)  # If successful, add to verified list
+                verified_videos.append(video_file)  
         except Exception as e:
             print(f"Failed to open or read video file {video_file}: {e}")
     return verified_videos
@@ -203,7 +198,7 @@ test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 class CustomVivit(nn.Module):
     def __init__(self, num_labels):
         super(CustomVivit, self).__init__()
-        self.vivit = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400")
+        self.vivit = VivitModel.from_pretrained('/scratch/booshra/final_project/vivit_model')
         self.dropout = nn.Dropout(0.5)  # Optional: to mitigate overfitting
         self.classifier = nn.Linear(self.vivit.config.hidden_size, num_labels)  
         self.sigmoid = nn.Sigmoid()  # Sigmoid activation for multi-label classification
@@ -317,7 +312,7 @@ def evaluate_model(model, test_loader, criterion):
     print(mcm)
 
 
-train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=3, accumulation_steps=4)
+train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, accumulation_steps=4)
 torch.save(model, 'model_complete.pth')
 evaluate_model(model, test_loader, criterion)
 

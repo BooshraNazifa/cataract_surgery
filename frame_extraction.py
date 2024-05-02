@@ -163,11 +163,11 @@ def extract_phase_frames(video_path, output_dir, phase_info):
 
 
 
-# Use the function to extract frames for each set
-extract_frames(train_resident, resident_videos_dir, output_dirs['train'], df)
-extract_frames(val_resident, resident_videos_dir, output_dirs['val'], df)
-extract_frames(train_staff, staff_videos_dir, output_dirs['train'], df)
-extract_frames(val_staff, staff_videos_dir, output_dirs['val'], df)
+# # Use the function to extract frames for each set
+# extract_frames(train_resident, resident_videos_dir, output_dirs['train'], df)
+# extract_frames(val_resident, resident_videos_dir, output_dirs['val'], df)
+# extract_frames(train_staff, staff_videos_dir, output_dirs['train'], df)
+# extract_frames(val_staff, staff_videos_dir, output_dirs['val'], df)
 
 # Extract frames for test videos
 extract_frames(test_filenames_resident, resident_videos_dir, output_dirs['test'], df)
