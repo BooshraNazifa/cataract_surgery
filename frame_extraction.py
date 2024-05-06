@@ -59,9 +59,6 @@ staff_videos = get_videos_excluding_tests(staff_videos_dir, test_videos)
 test_filenames_resident = ['191R1.mp4','191R2.mp4', '191R3.mp4', '191R4.mp4', '191R5.mp4', '191R6.mp4']
 test_filenames_staff = ['191S1.mp4', '191S3.mp4', '191S4.mov','191S5.mp4', '191S6.mp4', '191S7.mov']
 
-# Limit to the first 50 videos for each group
-# resident_videos = resident_videos
-# staff_videos = staff_videos
 
 print("Resident videos:", resident_videos)
 print("Staff videos:", staff_videos)
@@ -133,7 +130,7 @@ def extract_phase_frames(video_path, output_dir, phase_info):
     duration_in_seconds = (end_frame - start_frame) / fps
 
     # Calculate how many frames to extract 
-    total_frames_to_extract = int(15 * duration_in_seconds)
+    total_frames_to_extract = int(fps * duration_in_seconds)
 
     # Calculate the step size to spread the frame extraction evenly across the duration
     if total_frames_to_extract > 0:
@@ -150,7 +147,7 @@ def extract_phase_frames(video_path, output_dir, phase_info):
             # Calculate the next frame to extract
             frame_index = int(current_frame)
             frame = vid.get_data(frame_index)
-            frame_timestamp_seconds = frame_index / fps  # Timestamp in seconds
+            frame_timestamp_seconds = frame_index / fps  
 
             frame_filename = f"{phase}_{video_code}_{frame_index}_{frame_timestamp_seconds:.2f}.jpg"
             io.imsave(os.path.join(output_dir, frame_filename), np.array(frame))
@@ -163,11 +160,11 @@ def extract_phase_frames(video_path, output_dir, phase_info):
 
 
 
-# # Use the function to extract frames for each set
-# extract_frames(train_resident, resident_videos_dir, output_dirs['train'], df)
-# extract_frames(val_resident, resident_videos_dir, output_dirs['val'], df)
-# extract_frames(train_staff, staff_videos_dir, output_dirs['train'], df)
-# extract_frames(val_staff, staff_videos_dir, output_dirs['val'], df)
+# Use the function to extract frames for each set
+extract_frames(train_resident, resident_videos_dir, output_dirs['train'], df)
+extract_frames(val_resident, resident_videos_dir, output_dirs['val'], df)
+extract_frames(train_staff, staff_videos_dir, output_dirs['train'], df)
+extract_frames(val_staff, staff_videos_dir, output_dirs['val'], df)
 
 # Extract frames for test videos
 extract_frames(test_filenames_resident, resident_videos_dir, output_dirs['test'], df)

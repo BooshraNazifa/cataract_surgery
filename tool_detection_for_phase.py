@@ -16,7 +16,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from torchvision import transforms
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
-                             confusion_matrix, roc_curve, auc)
+                             confusion_matrix)
 
 
 # csv_directory = './Cataract_Tools'
@@ -95,11 +95,9 @@ print(dataframe)
 
 
 # Splitting the data into training, validation, and testing
-video_ids = dataframe['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=8, replace=False)
-print(video_ids)
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
+train_ids = ['191R1','191R2','191S1']
+val_ids = ['191R3']
+test_ids = ['191R4']
 
 train_df = dataframe[dataframe['FileName'].isin(train_ids)]
 val_df = dataframe[dataframe['FileName'].isin(val_ids)]
@@ -227,14 +225,14 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
-model_path = '/scratch/booshra/final_project/vivit_tool_phase_lastepoch.pth'
+model_path = '/home/booshra/final_project/cataract_surgery/tool_phase_model_checkpoint.pth'
+
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     print("Model loaded successfully.")
-
 
 def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulation_steps=4):
     model.train()
@@ -248,7 +246,8 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         accum_counter = 0
 
         for i, (videos, labels) in enumerate(dataloader):
-            videos, labels = videos.to(device), labels.to(device)
+            videos = videos.to(device, dtype=torch.float32)
+            labels = labels.to(device, dtype=torch.float32)
             try:
               with autocast():
                 outputs = model(videos)
@@ -269,7 +268,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
                    print(f"Skipping a video due to an error: {e}")
                    continue
 
-        if accum_counter != 0:  # Check if there are unapplied gradients
+        if accum_counter != 0:  
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -284,6 +283,8 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         total_val_loss = 0
         with torch.no_grad():  # No gradients needed for validation
             for videos, labels in val_dataloader:
+                videos = videos.to(device, dtype=torch.float32)
+                labels = labels.to(device, dtype=torch.float32)
                 try:
                   with autocast():
                     outputs = model(videos)
@@ -299,17 +300,18 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         avg_val_loss = total_val_loss / total_val if total_val != 0 else 0
         val_accuracy = total_val_correct / total_val if total_val != 0 else 0
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
-
         checkpoint = {
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict()}
         torch.save(checkpoint, model_path)
+        print('saving checkpoint')
 
         print(f"Epoch {epoch} complete.")
 
 
 train_model(train_dataloader, model, criterion, optimizer)
 torch.save(model, 'tool_complete.pth')
+print("fixed test set")
 
 def evaluate_model(dataloader, model):
     model.eval()  
@@ -356,19 +358,5 @@ def evaluate_model(dataloader, model):
     plt.title('Confusion Matrix Heatmap')
     plt.savefig('./images/vivit_groundtruth_confusion_matrix.png')
 
-    fpr, tpr, thresholds = roc_curve(true_labels, probabilities)
-    roc_auc = auc(fpr, tpr)
-
-    # Plot ROC curve
-    plt.figure()
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic')
-    plt.legend(loc="lower right")
-    plt.savefig('./images/vivit_groundtruth_roc.png')
 
 evaluate_model(test_dataloader, model)

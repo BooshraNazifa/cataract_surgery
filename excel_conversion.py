@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-test_results_df = pd.read_excel('./test_results.xlsx')
+test_results_df = pd.read_excel('../test_results.xlsx')
 test_results_df_sorted = test_results_df.sort_values(by=['Filename', 'Timestamp'])
 
 # Group by 'Filename' and 'True Phase' to get the start and end times for each phase in each video

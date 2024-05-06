@@ -144,12 +144,11 @@ transform = Compose([
 ])
 
 # Splitting the data into training, validation, and testing
-video_ids = df['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=8, replace=False)
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
+train_ids = ['191R1','191R2','191S1']
+val_ids = ['191R3']
+test_ids = ['191R4']
 
-train_df = df[df['FileName'].isin(video_ids)]
+train_df = df[df['FileName'].isin(train_ids)]
 val_df = df[df['FileName'].isin(val_ids)]
 test_df = df[df['FileName'].isin(test_ids)]
 
@@ -218,7 +217,7 @@ model = CustomVivit(num_labels).to(device)
 criterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-model_path = '/scratch/booshra/final_project/vivit_tool_lastepoch.pth'
+model_path = '/scratch/booshra/final_project/vivit_tool_all.pth'
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
@@ -237,7 +236,8 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         print("loading train loader")
         for step, (frames, labels) in enumerate(train_loader):
             optimizer.zero_grad()
-            frames, labels = frames.to(device), labels.to(device)
+            frames = frames.to(device, dtype=torch.float32)
+            labels = labels.to(device, dtype=torch.float32)
             with autocast():
                 outputs = model(frames)
                 loss = criterion(outputs, labels)
@@ -259,7 +259,8 @@ def train_model(model, criterion, optimizer, train_loader, val_loader, num_epoch
         total_val_loss = 0
         with torch.no_grad():
             for frames, labels in val_loader:
-                frames, labels = frames.to(device), labels.to(device)
+                frames = frames.to(device, dtype=torch.float32)
+                labels = labels.to(device, dtype=torch.float32)
                 outputs = model(frames)
                 val_loss = criterion(outputs, labels)
                 total_val_loss += val_loss.item()
@@ -313,6 +314,7 @@ def evaluate_model(model, test_loader, criterion):
 
 
 train_model(model, criterion, optimizer, train_loader, val_loader, num_epochs=5, accumulation_steps=4)
+print("Fixed Test Set.")
 torch.save(model, 'model_complete.pth')
 evaluate_model(model, test_loader, criterion)
 

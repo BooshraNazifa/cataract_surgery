@@ -1,35 +1,32 @@
 import pandas as pd
-import ast 
+import ast
 import av
 import os
+import torch
 import numpy as np
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from transformers import VivitModel
-from torch.utils.data import Dataset, DataLoader
-from torchvision.io import read_video
-from transformers import AdamW
+from torch.utils.data import DataLoader
+from torch.optim import AdamW
 from torch.nn import BCEWithLogitsLoss
-import torch
 from PIL import Image
 from torch.cuda.amp import autocast, GradScaler
-from torchvision import transforms
 import seaborn as sns
 import matplotlib.pyplot as plt
+from torchvision import transforms
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
-                             confusion_matrix, roc_curve, auc)
+                             confusion_matrix)
 
-videos_dir = "/scratch/booshra/tool"
-csv_directory = '/scratch/booshra/final_project/cataract_surgery/Cataract_Tools'
 
-## Load the Excel file for Phase detection results
-
-df = pd.read_excel('./test_results_by_phase.xlsx')
-
+# csv_directory = './Cataract_Tools'
+# videos_dir = './Videos'
+# Load the Excel file for ground truth 
+df = pd.read_excel('/scratch/booshra/final_project/cataract_surgery/test_results_by_phase.xlsx')
 # Function to convert time strings to seconds
 def time_to_seconds(time_str):
     if pd.isna(time_str):
-        return None  
+        return None
     hh, mm, ss, ff = map(int, time_str.split(':'))
     return hh * 3600 + mm * 60 + ss + ff / 100.0
 
@@ -37,21 +34,19 @@ def time_to_seconds(time_str):
 capsulorhexis_row = df[df['Unnamed: 0'] == 'Capsulorhexis'].iloc[0]
 
 phase_times = {}
-for i in range(1, len(capsulorhexis_row), 2):  
-    video_id = df.columns[i].strip() 
-    video_id = video_id.split(' ')[0]
+for i in range(1, len(capsulorhexis_row), 2):
+    video_id = df.columns[i].strip()
     start_time = capsulorhexis_row[i]
     end_time = capsulorhexis_row[i+1]
-    
+
     # Convert start and end times to seconds
     start_seconds = time_to_seconds(start_time)
     end_seconds = time_to_seconds(end_time)
-    
+
     phase_times[video_id] = (start_seconds, end_seconds)
 
 
 print(f"Phase and start/end times {phase_times}")
-
 
 
 def tools_to_vector(tools):
@@ -60,20 +55,22 @@ def load_data_from_directory(directory):
     csv_files = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith('.csv')]
     list_of_dfs = [pd.read_csv(file) for file in csv_files]
     for df in list_of_dfs:
-        df['FileName'] = df['FileName'].str.split('_').str[0]  
+        df['FileName'] = df['FileName'].str.split('_').str[0]
     combined_df = pd.concat(list_of_dfs, ignore_index=True)
     return combined_df
 
 def extract_tools(tool_info):
     if pd.notna(tool_info) and isinstance(tool_info, str):
         try:
-            tool_dicts = ast.literal_eval(tool_info)  
+            tool_dicts = ast.literal_eval(tool_info)
             return [tool['class'] for tool in tool_dicts]
         except Exception as e:
             print(f"Error parsing tool_info: {tool_info} with error {e}")
     return []
 
-
+# Directory containing CSV files
+csv_directory = '/scratch/booshra/final_project/cataract_surgery/Cataract_Tools'
+videos_dir = "/scratch/booshra/tool"
 dataframe = load_data_from_directory(csv_directory)
 
 # Preprocess the DataFrame as previously
@@ -87,25 +84,20 @@ def filter_frames(df, phase_times):
     results = []
     for index, row in df.iterrows():
         video_id = row['FileName']
-        time_recorded = row['Time Recorded']     
-        start_time, end_time = phase_times.get(video_id, (None, None))
-  
-        if start_time is not None and end_time is not None:
-            if start_time <= time_recorded <= end_time:
-                results.append(row)
+        time_recorded = row['Time Recorded']
+        start_time, end_time = phase_times.get(video_id, (0, 0))
+        if start_time <= time_recorded <= end_time:
+            results.append(row)
     return pd.DataFrame(results)
-
 
 dataframe = filter_frames(dataframe, phase_times)
 print(dataframe)
 
 
 # Splitting the data into training, validation, and testing
-video_ids = dataframe['FileName'].unique()
-video_ids = np.random.choice(video_ids, size=8, replace=False)
-print(video_ids)
-train_ids, test_ids = train_test_split(video_ids, test_size=2, random_state=42)
-train_ids, val_ids = train_test_split(train_ids, test_size=2, random_state=42)
+train_ids = ['191R1','191R2','191S1']
+val_ids = ['191R3']
+test_ids = ['191R4']
 
 train_df = dataframe[dataframe['FileName'].isin(train_ids)]
 val_df = dataframe[dataframe['FileName'].isin(val_ids)]
@@ -218,7 +210,7 @@ class CustomVivit(nn.Module):
         self.sigmoid = nn.Sigmoid()  
 
     def forward(self, inputs):
-        outputs = self.vivit(inputs)  
+        outputs = self.vivit(inputs) 
         x = self.dropout(outputs.pooler_output)  
         x = self.classifier(x)  
         x = self.sigmoid(x)  
@@ -233,14 +225,14 @@ model = model.to(device)
 optimizer = AdamW(model.parameters(), lr=0.001)
 criterion = BCEWithLogitsLoss()
 
-model_path = '/scratch/booshra/final_project/vivit_tool_phase_lastepoch.pth'
+model_path = '/home/booshra/final_project/cataract_surgery/tool_phase_hybrid_model_checkpoint.pth'
+
 
 if os.path.exists(model_path):
     checkpoint = torch.load(model_path, map_location='cuda')
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     print("Model loaded successfully.")
-
 
 def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulation_steps=4):
     model.train()
@@ -254,7 +246,8 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         accum_counter = 0
 
         for i, (videos, labels) in enumerate(dataloader):
-            videos, labels = videos.to(device), labels.to(device)
+            videos = videos.to(device, dtype=torch.float32)
+            labels = labels.to(device, dtype=torch.float32)
             try:
               with autocast():
                 outputs = model(videos)
@@ -275,7 +268,7 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
                    print(f"Skipping a video due to an error: {e}")
                    continue
 
-        if accum_counter != 0:  # Check if there are unapplied gradients
+        if accum_counter != 0:  
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -290,6 +283,8 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         total_val_loss = 0
         with torch.no_grad():  # No gradients needed for validation
             for videos, labels in val_dataloader:
+                videos = videos.to(device, dtype=torch.float32)
+                labels = labels.to(device, dtype=torch.float32)
                 try:
                   with autocast():
                     outputs = model(videos)
@@ -305,17 +300,18 @@ def train_model(dataloader, model, criterion, optimizer, num_epochs=5, accumulat
         avg_val_loss = total_val_loss / total_val if total_val != 0 else 0
         val_accuracy = total_val_correct / total_val if total_val != 0 else 0
         print(f"Epoch {epoch}, Validation Loss: {avg_val_loss}, Validation Accuracy: {val_accuracy:.2f}")
-
         checkpoint = {
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict()}
         torch.save(checkpoint, model_path)
+        print('saving checkpoint')
 
         print(f"Epoch {epoch} complete.")
 
 
 train_model(train_dataloader, model, criterion, optimizer)
-torch.save(model, 'tool_complete_hybrid.pth')
+torch.save(model, 'tool_complete.pth')
+print("fixed test set")
 
 def evaluate_model(dataloader, model):
     model.eval()  
@@ -332,7 +328,7 @@ def evaluate_model(dataloader, model):
                 probs = torch.sigmoid(outputs)
                 
                 predicted = (probs > 0.5).float()
-                predictions.extend(predicted.cpu().numpy())  
+                predictions.extend(predicted.cpu().numpy()) 
                 probabilities.extend(probs.cpu().numpy()) 
                 true_labels.extend(labels.cpu().numpy()) 
 
@@ -340,7 +336,6 @@ def evaluate_model(dataloader, model):
     predictions = [item for sublist in predictions for item in sublist]
     true_labels = [item for sublist in true_labels for item in sublist]
     probabilities = [item for sublist in probabilities for item in sublist] if any(isinstance(i, list) for i in probabilities) else probabilities
-
 
     # Calculate metrics
     accuracy = accuracy_score(true_labels, predictions)
@@ -361,21 +356,7 @@ def evaluate_model(dataloader, model):
     plt.xlabel('Predicted labels')
     plt.ylabel('True labels')
     plt.title('Confusion Matrix Heatmap')
-    plt.savefig('./images/vivit_hybrid_confusion_matrix.png')
+    plt.savefig('./images/vivit_groundtruth_confusion_matrix.png')
 
-    fpr, tpr, thresholds = roc_curve(true_labels, probabilities)
-    roc_auc = auc(fpr, tpr)
-
-    # Plot ROC curve
-    plt.figure()
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic')
-    plt.legend(loc="lower right")
-    plt.savefig('./images/vivit_groundtruth_roc.png')
 
 evaluate_model(test_dataloader, model)

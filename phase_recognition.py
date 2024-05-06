@@ -15,8 +15,8 @@ from sklearn.metrics import precision_score, recall_score, f1_score, classificat
 
 
 # Directory containing your images in server
-# train_image_dir = '/scratch/booshra/half/TrainFrames'
-# val_image_dir = '/scratch/booshra/half/ValFrames'
+train_image_dir = '/scratch/booshra/half/TrainFrames'
+val_image_dir = '/scratch/booshra/half/ValFrames'
 test_image_dir = '/scratch/booshra/50/TestFrames'
 
 # List of phase names as your classes
@@ -65,14 +65,14 @@ transform = transforms.Compose([
 
 
 # Create dataset
-# print("Loading Train Dataset...")
-# train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
-# train_dataset_size = len(train_dataset)
-# print("Size of the dataset:", train_dataset_size)
-# print("Loading Validation Dataset...")
-# val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
-# val_dataset_size = len(val_dataset)
-# print("Size of the dataset:", val_dataset_size)
+print("Loading Train Dataset...")
+train_dataset = SurgicalPhaseDataset(train_image_dir, transform=transform)
+train_dataset_size = len(train_dataset)
+print("Size of the dataset:", train_dataset_size)
+print("Loading Validation Dataset...")
+val_dataset = SurgicalPhaseDataset(val_image_dir, transform=transform)
+val_dataset_size = len(val_dataset)
+print("Size of the dataset:", val_dataset_size)
 # print("Loading Test Dataset...")
 test_dataset = SurgicalPhaseDataset(test_image_dir, transform=transform)
 test_dataset_size = len(test_dataset)
@@ -82,8 +82,8 @@ print("Size of the dataset:", test_dataset_size)
 
 # Create dataloaders
 print("Creating Dataloaders...")
-# train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=2)
-# val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=2)
+train_dataloader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=2)
+val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=2)
 test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True, num_workers=2)
 
 # Load Pretrained ResNet and Modify Final Layer
@@ -110,91 +110,91 @@ if os.path.exists(model_path):
     best_val_loss = checkpoint['best_val_loss']
     print("Model loaded successfully.")
 
-# train_losses, val_losses = [], []
-# train_accs, val_accs = [], []
-# best_val_loss = float('inf')
+train_losses, val_losses = [], []
+train_accs, val_accs = [], []
+best_val_loss = float('inf')
 
-# # Training Loop
-# for epoch in range(5):
-#     print(epoch)
-#     resnet.train()
-#     running_loss = 0.0
-#     correct = 0
-#     total = 0
+# Training Loop
+for epoch in range(5):
+    print(epoch)
+    resnet.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
 
-#     for inputs, labels, filename, timestamp in train_dataloader:
-#         try:
-#             inputs, labels = inputs.to(device), labels.to(device)
-#             outputs = resnet(inputs)
-#             loss = criterion(outputs, labels)
-#             optimizer.zero_grad()
-#             loss.backward()
-#             optimizer.step()
+    for inputs, labels, filename, timestamp in train_dataloader:
+        try:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = resnet(inputs)
+            loss = criterion(outputs, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-#             running_loss += loss.item()
-#             _, preds = torch.max(outputs, 1)
-#             correct += (preds == labels).sum().item()
-#             total += labels.size(0)
-#         except Exception as e:
-#             print(f"Error during training: {e}")
-#             continue
+            running_loss += loss.item()
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+        except Exception as e:
+            print(f"Error during training: {e}")
+            continue
 
-#     scheduler.step()
-#     train_losses.append(running_loss / len(train_dataloader))
-#     train_accs.append(correct / total)
+    scheduler.step()
+    train_losses.append(running_loss / len(train_dataloader))
+    train_accs.append(correct / total)
 
-#     # Validation Loop
-#     resnet.eval()
-#     val_loss = 0.0
-#     correct = 0
-#     total = 0
-#     with torch.no_grad():
+    # Validation Loop
+    resnet.eval()
+    val_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
 
-#         for inputs, labels, filename, timestamp in val_dataloader:
-#             try:
-#                 inputs, labels = inputs.to(device), labels.to(device)
-#                 outputs = resnet(inputs)
-#                 loss = criterion(outputs, labels)
-#                 val_loss += loss.item()
-#                 _, preds = torch.max(outputs, 1)
-#                 correct += (preds == labels).sum().item()
-#                 total += labels.size(0)
-#             except Exception as e:
-#                 print(f"Error during validation: {e}")
-#                 continue
+        for inputs, labels, filename, timestamp in val_dataloader:
+            try:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = resnet(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                _, preds = torch.max(outputs, 1)
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+            except Exception as e:
+                print(f"Error during validation: {e}")
+                continue
 
-#     epoch_val_loss = val_loss / len(val_dataloader)
-#     epoch_val_acc = correct / total
-#     val_losses.append(epoch_val_loss)
-#     val_accs.append(epoch_val_acc)
-#     print(f'Val Loss: {epoch_val_loss:.4f}, Accuracy: {epoch_val_acc:.4f}')
+    epoch_val_loss = val_loss / len(val_dataloader)
+    epoch_val_acc = correct / total
+    val_losses.append(epoch_val_loss)
+    val_accs.append(epoch_val_acc)
+    print(f'Val Loss: {epoch_val_loss:.4f}, Accuracy: {epoch_val_acc:.4f}')
 
-#     # Checkpointing
-#     if epoch_val_loss < best_val_loss:
-#         best_val_loss = epoch_val_loss
-#         checkpoint = {
-#             'model_state_dict': resnet.state_dict(),
-#             'optimizer_state_dict': optimizer.state_dict(),
-#             'scheduler_state_dict': scheduler.state_dict(),
-#             'best_val_loss': best_val_loss
-#         }
-#         try:
-#             torch.save(checkpoint, model_path)
-#             print('Validation loss decreased, saving checkpoint')
-#         except Exception as e:
-#             print(f"Error saving checkpoint: {e}")
+    # Checkpointing
+    if epoch_val_loss < best_val_loss:
+        best_val_loss = epoch_val_loss
+        checkpoint = {
+            'model_state_dict': resnet.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'best_val_loss': best_val_loss
+        }
+        try:
+            torch.save(checkpoint, model_path)
+            print('Validation loss decreased, saving checkpoint')
+        except Exception as e:
+            print(f"Error saving checkpoint: {e}")
 
-# # Calculate overall accuracies
-# overall_train_accuracy = sum(train_accs) / len(train_accs)
-# overall_val_accuracy = sum(val_accs) / len(val_accs)
+# Calculate overall accuracies
+overall_train_accuracy = sum(train_accs) / len(train_accs)
+overall_val_accuracy = sum(val_accs) / len(val_accs)
 
-# # Convert to percentage
-# overall_train_accuracy_percentage = overall_train_accuracy * 100
-# overall_val_accuracy_percentage = overall_val_accuracy * 100
+# Convert to percentage
+overall_train_accuracy_percentage = overall_train_accuracy * 100
+overall_val_accuracy_percentage = overall_val_accuracy * 100
 
-# print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
-# print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
-# torch.save(resnet, 'resnet_complete.pth')
+print(f'Overall Training Accuracy: {overall_train_accuracy_percentage:.2f}%')
+print(f'Overall Validation Accuracy: {overall_val_accuracy_percentage:.2f}%')
+torch.save(resnet, 'resnet_complete.pth')
 
 # Test Loop 
 resnet.eval()  
@@ -287,7 +287,7 @@ print(report)
 
 # Creating a heatmap for the confusion matrix
 plt.figure(figsize=(10, 7))
-sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', cbar=False)  # 'g' for integer format
+sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', cbar=False)  
 plt.xlabel('Predicted labels')
 plt.ylabel('True labels')
 plt.title('Confusion Matrix Heatmap')
